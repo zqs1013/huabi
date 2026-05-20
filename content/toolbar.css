@@ -76,7 +76,14 @@
   background: var(--hb-hover);
 }
 
-#huabi-toolbar button.huabi-active-tool {
+#huabi-toolbar button.huabi-active-tool,
+#huabi-toolbar button.huabi-mode-active {
+  background: var(--hb-active);
+  color: var(--hb-active-fg);
+}
+
+/* 鼠标模式下仍保留上次选中工具（含荧光笔）的高亮 */
+#huabi-root.huabi-mouse-mode #huabi-toolbar [data-tool].huabi-active-tool {
   background: var(--hb-active);
   color: var(--hb-active-fg);
 }
@@ -123,11 +130,16 @@
   height: 18px;
 }
 
-#huabi-toolbar .huabi-color-btn.huabi-active-tool {
+#huabi-toolbar .huabi-color-btn.huabi-active-tool,
+#huabi-root.huabi-mouse-mode #huabi-toolbar .huabi-color-btn.huabi-active-tool {
   color: var(--hb-active-fg);
 }
 
-#huabi-toolbar .huabi-color-btn.huabi-active-tool .huabi-icon {
+#huabi-toolbar .huabi-color-btn.huabi-active-tool .huabi-icon,
+#huabi-root.huabi-mouse-mode
+  #huabi-toolbar
+  .huabi-color-btn.huabi-active-tool
+  .huabi-icon {
   color: #000;
 }
 
@@ -165,7 +177,11 @@
   opacity: 1;
 }
 
-.huabi-tool-wrap .huabi-tool-btn.huabi-active-tool + .huabi-tool-caret {
+.huabi-tool-wrap .huabi-tool-btn.huabi-active-tool + .huabi-tool-caret,
+#huabi-root.huabi-mouse-mode
+  .huabi-tool-wrap
+  .huabi-tool-btn.huabi-active-tool
+  + .huabi-tool-caret {
   border-bottom-color: var(--hb-active-fg, #0078d4);
 }
 

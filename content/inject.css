@@ -17,17 +17,10 @@
   pointer-events: none;
 }
 
-#huabi-root.huabi-active.huabi-mouse-mode .huabi-canvas-wrap {
-  pointer-events: none;
-  cursor: default;
-}
-
-#huabi-root.huabi-active.huabi-mouse-mode.huabi-tool-eraser .huabi-canvas-wrap {
-  pointer-events: auto;
-}
-
+#huabi-root.huabi-active.huabi-mouse-mode .huabi-canvas-wrap,
 #huabi-root.huabi-active.huabi-brush-mode .huabi-canvas-wrap {
   pointer-events: auto;
+  cursor: default;
 }
 
 .huabi-canvas-wrap.huabi-notes-hidden {
@@ -47,6 +40,8 @@
 }
 
 #huabi-main,
+#huabi-shape,
+#huabi-text,
 #huabi-preview {
   position: absolute;
   inset: 0;
@@ -54,6 +49,11 @@
   height: 100%;
   touch-action: none;
   cursor: inherit;
+}
+
+#huabi-shape,
+#huabi-text {
+  pointer-events: none;
 }
 
 #huabi-preview.huabi-hl-preview {
@@ -112,4 +112,16 @@
 
 #huabi-root.huabi-text-editing .huabi-canvas-wrap {
   pointer-events: none !important;
+}
+
+#huabi-root.huabi-object-dragging .huabi-canvas-wrap,
+#huabi-root.huabi-object-dragging #huabi-main,
+#huabi-root.huabi-object-dragging #huabi-shape,
+#huabi-root.huabi-object-dragging #huabi-text,
+#huabi-root.huabi-object-dragging #huabi-preview,
+#huabi-root.huabi-text-dragging .huabi-canvas-wrap,
+#huabi-root.huabi-text-dragging #huabi-main,
+#huabi-root.huabi-text-dragging #huabi-text,
+#huabi-root.huabi-text-dragging #huabi-preview {
+  cursor: move !important;
 }

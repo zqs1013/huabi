@@ -2,6 +2,8 @@
   const SETTINGS_KEY = "huabi_settings";
   const LEGACY_KEY = "huabi_defaults";
 
+  const DEFAULT_PEN_TOOL = "pen2";
+
   const COLOR_EDIT_TOOLS = ["pen1", "pen2", "highlighter1", "highlighter2"];
 
   const DEFAULT_TOOL_PROFILES = {
@@ -217,10 +219,12 @@
   function getDefaultSettings() {
     return {
       toolProfiles: deepClone(DEFAULT_TOOL_PROFILES),
-      lastPenTool: "pen1",
+      lastPenTool: DEFAULT_PEN_TOOL,
       tableRows: 3,
       tableCols: 3,
       coordTicks: 5,
+      coordStart: 0,
+      coordStep: 1,
       coordShowY: false,
       textFontSize: 0,
       toolbarPosition: null,
@@ -272,6 +276,16 @@
     }
     settings.toolbarVisible = normalizeToolbarVisible(raw?.toolbarVisible);
     settings.arrowEnds = raw?.arrowEnds === "both" ? "both" : "end";
+    settings.lastPenTool =
+      raw?.lastPenTool === "pen1" || raw?.lastPenTool === "pen2"
+        ? raw.lastPenTool
+        : DEFAULT_PEN_TOOL;
+    const def = getDefaultSettings();
+    const start = Number(raw?.coordStart);
+    settings.coordStart = Number.isFinite(start) ? start : def.coordStart;
+    const step = Number(raw?.coordStep);
+    settings.coordStep =
+      Number.isFinite(step) && step > 0 && step <= 10000 ? step : def.coordStep;
     return settings;
   }
 
@@ -423,6 +437,7 @@
 
   window.HuabiSettings = {
     SETTINGS_KEY,
+    DEFAULT_PEN_TOOL,
     DEFAULT_TOOL_PROFILES,
     DEFAULT_SHORTCUTS,
     COLOR_EDIT_TOOLS,

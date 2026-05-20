@@ -10,18 +10,24 @@
   const MAX_HISTORY = 25;
 
   class DrawingEngine {
-    constructor(mainCanvas, highlightCanvas, previewCanvas, settings) {
+    constructor(mainCanvas, highlightCanvas, shapeCanvas, textCanvas, previewCanvas, settings) {
       this.mainCanvas = mainCanvas;
       this.highlightCanvas = highlightCanvas;
+      this.shapeCanvas = shapeCanvas;
+      this.textCanvas = textCanvas;
       this.previewCanvas = previewCanvas;
       const ctxOpts = { willReadFrequently: true };
       this.mainCtx = mainCanvas.getContext("2d", ctxOpts);
       this.highlightCtx = highlightCanvas.getContext("2d", ctxOpts);
+      this.shapeCtx = shapeCanvas.getContext("2d", ctxOpts);
+      this.textCtx = textCanvas.getContext("2d", ctxOpts);
       this.previewCtx = previewCanvas.getContext("2d", ctxOpts);
+      this.shapeItems = [];
+      this.textItems = [];
       this.dpr = window.devicePixelRatio || 1;
       this.toolProfiles = settings.toolProfiles;
-      this.lastPenTool = settings.lastPenTool || "pen1";
-      this.tool = "pen1";
+      this.lastPenTool = settings.lastPenTool || S.DEFAULT_PEN_TOOL;
+      this.tool = S.DEFAULT_PEN_TOOL;
       this.isDrawing = false;
       this.startX = 0;
       this.startY = 0;
@@ -30,6 +36,8 @@
       this.tableRows = settings.tableRows ?? 3;
       this.tableCols = settings.tableCols ?? 3;
       this.coordTicks = settings.coordTicks ?? 5;
+      this.coordStart = settings.coordStart ?? 0;
+      this.coordStep = settings.coordStep ?? 1;
       this.coordShowY = settings.coordShowY === true;
       this.textFontSize = settings.textFontSize ?? 0;
       this.arrowEnds = settings.arrowEnds === "both" ? "both" : "end";
@@ -49,10 +57,12 @@
 
     applySettings(settings) {
       this.toolProfiles = settings.toolProfiles;
-      this.lastPenTool = settings.lastPenTool || "pen1";
+      this.lastPenTool = settings.lastPenTool || S.DEFAULT_PEN_TOOL;
       this.tableRows = settings.tableRows ?? 3;
       this.tableCols = settings.tableCols ?? 3;
       this.coordTicks = settings.coordTicks ?? 5;
+      this.coordStart = settings.coordStart ?? 0;
+      this.coordStep = settings.coordStep ?? 1;
       this.coordShowY = settings.coordShowY === true;
       this.textFontSize = settings.textFontSize ?? 0;
       this.arrowEnds = settings.arrowEnds === "both" ? "both" : "end";
@@ -85,8 +95,7 @@
       return this.getProfile(target);
     }
 
-    drawText(text, x, y, fontSize, color) {
-      const ctx = this.mainCtx;
+    _paintTextOnCtx(ctx, text, x, y, fontSize, color) {
       const lineHeight = fontSize * 1.25;
       ctx.save();
       ctx.font = `${fontSize}px ${S.getTextFontCss()}`;
@@ -98,6 +107,431 @@
       ctx.restore();
     }
 
+    measureTextBlock(text, fontSize) {
+      const lines = text.split("\n");
+      const lineHeight = fontSize * 1.25;
+      const ctx = this.textCtx;
+      ctx.save();
+      ctx.font = `${fontSize}px ${S.getTextFontCss()}`;
+      let w = 0;
+      for (const line of lines) {
+        w = Math.max(w, ctx.measureText(line).width);
+      }
+      ctx.restore();
+      return { w, h: Math.max(lineHeight, lines.length * lineHeight) };
+    }
+
+    _newTextId() {
+      return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    }
+
+    addTextItem({ id, text, x, y, fontSize, color }) {
+      const { w, h } = this.measureTextBlock(text, fontSize);
+      this.textItems.push({ id: id || this._newTextId(), text, x, y, fontSize, color, w, h });
+    }
+
+    updateTextItem(id, patch) {
+      let item = this.textItems.find((t) => t.id === id);
+      if (!item) {
+        item = { id, text: "", x: 0, y: 0, fontSize: 16, color: "#252423" };
+        this.textItems.push(item);
+      }
+      Object.assign(item, patch);
+      const { w, h } = this.measureTextBlock(item.text, item.fontSize);
+      item.w = w;
+      item.h = h;
+    }
+
+    removeTextItem(id) {
+      const i = this.textItems.findIndex((t) => t.id === id);
+      if (i >= 0) this.textItems.splice(i, 1);
+    }
+
+    renderTexts() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      this.textCtx.clearRect(0, 0, w, h);
+      for (const item of this.textItems) {
+        this._paintTextOnCtx(
+          this.textCtx,
+          item.text,
+          item.x,
+          item.y,
+          item.fontSize,
+          item.color
+        );
+      }
+    }
+
+    hitTestText(x, y, padding = 6) {
+      for (let i = this.textItems.length - 1; i >= 0; i--) {
+        const t = this.textItems[i];
+        if (
+          x >= t.x - padding &&
+          x <= t.x + t.w + padding &&
+          y >= t.y - padding &&
+          y <= t.y + t.h + padding
+        ) {
+          return { kind: "text", item: t };
+        }
+      }
+      return null;
+    }
+
+    _newShapeId() {
+      return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    }
+
+    _applyItemStrokeStyle(ctx, item) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = item.color;
+      ctx.lineWidth = item.lineWidth;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    }
+
+    _shapeBounds(item) {
+      const left = Math.min(item.x1, item.x2);
+      const top = Math.min(item.y1, item.y2);
+      const width = Math.abs(item.x2 - item.x1);
+      const height = Math.abs(item.y2 - item.y1);
+      return { left, top, width, height };
+    }
+
+    _distToSegment(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len2 = dx * dx + dy * dy;
+      if (len2 < 1) return Math.hypot(px - x1, py - y1);
+      let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+    }
+
+    _strokeHitThreshold(item, padding) {
+      return padding + Math.max(4, (item.lineWidth || 2) * 1.5 + 2);
+    }
+
+    _hitNearAnySegment(x, y, segments, thresh) {
+      for (const seg of segments) {
+        if (this._distToSegment(x, y, seg[0], seg[1], seg[2], seg[3]) <= thresh) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    _hitRectStroke(x, y, x1, y1, x2, y2, thresh) {
+      const left = Math.min(x1, x2);
+      const top = Math.min(y1, y2);
+      const right = Math.max(x1, x2);
+      const bottom = Math.max(y1, y2);
+      return this._hitNearAnySegment(
+        x,
+        y,
+        [
+          [left, top, right, top],
+          [right, top, right, bottom],
+          [right, bottom, left, bottom],
+          [left, bottom, left, top],
+        ],
+        thresh
+      );
+    }
+
+    _hitCircleStroke(x, y, x1, y1, x2, y2, thresh) {
+      const left = Math.min(x1, x2);
+      const top = Math.min(y1, y2);
+      const width = Math.abs(x2 - x1);
+      const height = Math.abs(y2 - y1);
+      if (width < 2 && height < 2) return false;
+      const rx = width / 2;
+      const ry = height / 2;
+      if (rx < 1 || ry < 1) return false;
+      const cx = left + rx;
+      const cy = top + ry;
+      const angle = Math.atan2((y - cy) / ry, (x - cx) / rx);
+      const bx = cx + rx * Math.cos(angle);
+      const by = cy + ry * Math.sin(angle);
+      return Math.hypot(x - bx, y - by) <= thresh;
+    }
+
+    _hitTableStroke(x, y, item, thresh) {
+      const { x1, y1, x2, y2 } = item;
+      const left = Math.min(x1, x2);
+      const top = Math.min(y1, y2);
+      const width = Math.abs(x2 - x1);
+      const height = Math.abs(y2 - y1);
+      if (width < 4 || height < 4) return false;
+      const cols = Math.max(1, item.tableCols ?? this.tableCols);
+      const rows = Math.max(1, item.tableRows ?? this.tableRows);
+      const colStep = width / cols;
+      const rowStep = height / rows;
+      const segments = [
+        [left, top, left + width, top],
+        [left + width, top, left + width, top + height],
+        [left + width, top + height, left, top + height],
+        [left, top + height, left, top],
+      ];
+      for (let c = 1; c < cols; c++) {
+        const sx = left + colStep * c;
+        segments.push([sx, top, sx, top + height]);
+      }
+      for (let r = 1; r < rows; r++) {
+        const sy = top + rowStep * r;
+        segments.push([left, sy, left + width, sy]);
+      }
+      return this._hitNearAnySegment(x, y, segments, thresh);
+    }
+
+    _hitAxesStroke(x, y, item, thresh) {
+      const { x1, y1, x2, y2 } = item;
+      const left = Math.min(x1, x2);
+      const top = Math.min(y1, y2);
+      const width = Math.abs(x2 - x1);
+      const height = Math.abs(y2 - y1);
+      const showY = item.coordShowY != null ? !!item.coordShowY : !!this.coordShowY;
+      if (width < 8 || (showY && height < 8)) return false;
+
+      const cx = left + width / 2;
+      const cy = top + height / 2;
+      const ticks = Math.max(1, Math.min(20, item.coordTicks ?? this.coordTicks));
+      const tickLen = Math.max(4, Math.min(10, (item.lineWidth || 2) * 2));
+      const arrow = Math.max(6, tickLen + 2);
+      const segments = [[left, cy, left + width, cy]];
+
+      if (showY) {
+        segments.push([cx, top, cx, top + height]);
+      }
+
+      const stepX = width / ticks;
+      for (let i = 1; i < ticks; i++) {
+        const sx = left + stepX * i;
+        segments.push([sx, cy - tickLen, sx, cy + tickLen]);
+      }
+      if (showY) {
+        const stepY = height / ticks;
+        for (let i = 1; i < ticks; i++) {
+          const sy = top + stepY * i;
+          segments.push([cx - tickLen, sy, cx + tickLen, sy]);
+        }
+      }
+
+      const right = left + width;
+      segments.push(
+        [right, cy, right - arrow, cy - arrow * 0.45],
+        [right, cy, right - arrow, cy + arrow * 0.45]
+      );
+      if (showY) {
+        segments.push(
+          [cx, top, cx - arrow * 0.45, top + arrow],
+          [cx, top, cx + arrow * 0.45, top + arrow]
+        );
+      }
+
+      return this._hitNearAnySegment(x, y, segments, thresh);
+    }
+
+    _hitArrowHeadSegments(tipX, tipY, angle, lineWidth) {
+      const len = Math.max(8, (lineWidth || 2) * 3);
+      const a1 = angle - 0.45;
+      const a2 = angle + 0.45;
+      return [
+        [tipX, tipY, tipX - len * Math.cos(a1), tipY - len * Math.sin(a1)],
+        [tipX, tipY, tipX - len * Math.cos(a2), tipY - len * Math.sin(a2)],
+      ];
+    }
+
+    _hitArrowLineStroke(x, y, item, thresh) {
+      const { x1, y1, x2, y2 } = item;
+      const dist = Math.hypot(x2 - x1, y2 - y1);
+      if (dist < 1) return false;
+      const segments = [[x1, y1, x2, y2]];
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      segments.push(...this._hitArrowHeadSegments(x2, y2, angle, item.lineWidth));
+      if (item.arrowEnds === "both") {
+        segments.push(...this._hitArrowHeadSegments(x1, y1, angle + Math.PI, item.lineWidth));
+      }
+      return this._hitNearAnySegment(x, y, segments, thresh);
+    }
+
+    _hitTestShapeItem(item, x, y, padding) {
+      const thresh = this._strokeHitThreshold(item, padding);
+      const { left, top, width, height } = this._shapeBounds(item);
+      const pad = thresh + 2;
+      if (
+        x < left - pad ||
+        x > left + width + pad ||
+        y < top - pad ||
+        y > top + height + pad
+      ) {
+        return false;
+      }
+
+      if (item.type === "line") {
+        return this._distToSegment(x, y, item.x1, item.y1, item.x2, item.y2) <= thresh;
+      }
+      if (item.type === "arrowLine") {
+        return this._hitArrowLineStroke(x, y, item, thresh);
+      }
+      if (item.type === "rect") {
+        return this._hitRectStroke(x, y, item.x1, item.y1, item.x2, item.y2, thresh);
+      }
+      if (item.type === "circle") {
+        return this._hitCircleStroke(x, y, item.x1, item.y1, item.x2, item.y2, thresh);
+      }
+      if (item.type === "table") {
+        return this._hitTableStroke(x, y, item, thresh);
+      }
+      if (item.type === "axes") {
+        return this._hitAxesStroke(x, y, item, thresh);
+      }
+      return false;
+    }
+
+    hitTestShape(x, y, padding = 6) {
+      for (let i = this.shapeItems.length - 1; i >= 0; i--) {
+        const s = this.shapeItems[i];
+        if (this._hitTestShapeItem(s, x, y, padding)) {
+          return { kind: "shape", item: s };
+        }
+      }
+      return null;
+    }
+
+    hitTestCanvasObject(x, y, padding = 6) {
+      return this.hitTestText(x, y, padding) || this.hitTestShape(x, y, padding);
+    }
+
+    addShapeItem(item) {
+      this.shapeItems.push({
+        id: item.id || this._newShapeId(),
+        type: item.type,
+        x1: item.x1,
+        y1: item.y1,
+        x2: item.x2,
+        y2: item.y2,
+        color: item.color,
+        lineWidth: item.lineWidth,
+        tableRows: item.tableRows,
+        tableCols: item.tableCols,
+        coordTicks: item.coordTicks,
+        coordStart: item.coordStart,
+        coordStep: item.coordStep,
+        coordShowY: item.coordShowY,
+        arrowEnds: item.arrowEnds,
+      });
+    }
+
+    updateShapeItem(id, patch) {
+      const item = this.shapeItems.find((s) => s.id === id);
+      if (!item) return;
+      Object.assign(item, patch);
+    }
+
+    removeShapeItem(id) {
+      const i = this.shapeItems.findIndex((s) => s.id === id);
+      if (i >= 0) this.shapeItems.splice(i, 1);
+    }
+
+    _paintShapeItem(ctx, item) {
+      this._applyItemStrokeStyle(ctx, item);
+      if (item.type === "line") {
+        const dist = Math.hypot(item.x2 - item.x1, item.y2 - item.y1);
+        if (dist < 1) return;
+        ctx.beginPath();
+        ctx.moveTo(item.x1, item.y1);
+        ctx.lineTo(item.x2, item.y2);
+        ctx.stroke();
+      } else if (item.type === "rect") {
+        ctx.strokeRect(item.x1, item.y1, item.x2 - item.x1, item.y2 - item.y1);
+      } else if (item.type === "table") {
+        ctx.strokeRect(item.x1, item.y1, item.x2 - item.x1, item.y2 - item.y1);
+        this._drawTableGrid(ctx, item.x1, item.y1, item.x2, item.y2, {
+          rows: item.tableRows,
+          cols: item.tableCols,
+        });
+      } else if (item.type === "axes") {
+        this._drawAxes(ctx, item.x1, item.y1, item.x2, item.y2, {
+          coordTicks: item.coordTicks,
+          coordStart: item.coordStart ?? 0,
+          coordStep: item.coordStep ?? 1,
+          coordShowY: item.coordShowY,
+        });
+      } else if (item.type === "arrowLine") {
+        this._drawArrowLine(
+          ctx,
+          item.x1,
+          item.y1,
+          item.x2,
+          item.y2,
+          item.arrowEnds || "end"
+        );
+      } else if (item.type === "circle") {
+        this._drawCircle(ctx, item.x1, item.y1, item.x2, item.y2);
+      }
+    }
+
+    renderShapes() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      this.shapeCtx.clearRect(0, 0, w, h);
+      for (const item of this.shapeItems) {
+        this._paintShapeItem(this.shapeCtx, item);
+      }
+    }
+
+    _commitShapeFromDrag(tool, x1, y1, x2, y2) {
+      const dist = Math.hypot(x2 - x1, y2 - y1);
+      const { left, top, width, height } = {
+        left: Math.min(x1, x2),
+        top: Math.min(y1, y2),
+        width: Math.abs(x2 - x1),
+        height: Math.abs(y2 - y1),
+      };
+      if (tool === "line" || tool === "arrowLine") {
+        if (dist < 1) return false;
+      } else if (tool === "circle" || tool === "rect") {
+        if (width < 2 && height < 2) return false;
+      } else if (tool === "table") {
+        if (width < 4 || height < 4) return false;
+      } else if (tool === "axes") {
+        const showY = !!this.coordShowY;
+        if (width < 8 || (showY && height < 8)) return false;
+      }
+
+      const style = this.getActiveStyle();
+      const item = {
+        type: tool,
+        x1,
+        y1,
+        x2,
+        y2,
+        color: style.color,
+        lineWidth: style.lineWidth,
+      };
+      if (tool === "table") {
+        item.tableRows = this.tableRows;
+        item.tableCols = this.tableCols;
+      } else if (tool === "axes") {
+        item.coordTicks = this.coordTicks;
+        item.coordStart = this.coordStart;
+        item.coordStep = this.coordStep;
+        item.coordShowY = this.coordShowY;
+      } else if (tool === "arrowLine") {
+        item.arrowEnds = this.arrowEnds;
+      }
+      this.pushHistory();
+      this.addShapeItem(item);
+      this.renderShapes();
+      return true;
+    }
+
+    drawText(text, x, y, fontSize, color) {
+      this.addTextItem({ text, x, y, fontSize, color });
+      this.renderTexts();
+    }
+
     resize() {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -105,7 +539,7 @@
 
       const mainSnap = this._captureMain();
       const hlSnap = this._captureHighlight();
-      [this.highlightCanvas, this.mainCanvas, this.previewCanvas].forEach((c) => {
+      [this.highlightCanvas, this.mainCanvas, this.shapeCanvas, this.textCanvas, this.previewCanvas].forEach((c) => {
         const snap =
           c === this.mainCanvas
             ? mainSnap
@@ -122,6 +556,8 @@
         if (snap) ctx.putImageData(snap, 0, 0);
       });
       this._resizeHlStrokeCanvas();
+      this.renderShapes();
+      this.renderTexts();
     }
 
     _resizeHlStrokeCanvas() {
@@ -180,9 +616,23 @@
       if (snap.main && snap.highlight) {
         this.mainCtx.putImageData(snap.main, 0, 0);
         this.highlightCtx.putImageData(snap.highlight, 0, 0);
+        this.textItems = snap.textItems
+          ? snap.textItems.map((t) => ({ ...t }))
+          : [];
+        this.shapeItems = snap.shapeItems
+          ? snap.shapeItems.map((s) => ({ ...s }))
+          : [];
+        this.renderShapes();
+        this.renderTexts();
         return;
       }
-      if (snap.data) this.mainCtx.putImageData(snap, 0, 0);
+      if (snap.data) {
+        this.mainCtx.putImageData(snap, 0, 0);
+        this.textItems = [];
+        this.shapeItems = [];
+        this.renderShapes();
+        this.renderTexts();
+      }
     }
 
     _captureHistorySnap() {
@@ -191,6 +641,8 @@
       return {
         main: this.mainCtx.getImageData(0, 0, w, h),
         highlight: this.highlightCtx.getImageData(0, 0, w, h),
+        shapeItems: this.shapeItems.map((s) => ({ ...s })),
+        textItems: this.textItems.map((t) => ({ ...t })),
       };
     }
 
@@ -306,6 +758,10 @@
       const h = window.innerHeight;
       this.mainCtx.clearRect(0, 0, w, h);
       this.highlightCtx.clearRect(0, 0, w, h);
+      this.shapeItems = [];
+      this.textItems = [];
+      this.renderShapes();
+      this.renderTexts();
       this.clearPreview();
     }
 
@@ -665,7 +1121,12 @@
         ctx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
         this._drawTableGrid(ctx, this.startX, this.startY, x, y);
       } else if (tool === "axes") {
-        this._drawAxes(ctx, this.startX, this.startY, x, y);
+        this._drawAxes(ctx, this.startX, this.startY, x, y, {
+          coordTicks: this.coordTicks,
+          coordStart: this.coordStart,
+          coordStep: this.coordStep,
+          coordShowY: this.coordShowY,
+        });
       } else if (tool === "arrowLine") {
         this._drawArrowLine(
           ctx,
@@ -681,7 +1142,7 @@
     }
 
     onPointerUp(e) {
-      if (!this.isDrawing) return;
+      if (!this.isDrawing) return false;
       const tool = this._activeTool();
       this.isDrawing = false;
       this.strokeTool = null;
@@ -698,7 +1159,8 @@
       if (S.isEraserTool(tool)) {
         this._eraseLineBoth(this.lastX, this.lastY, x, y);
         this._endErase(this.mainCtx);
-        return;
+        this.clearPreview();
+        return false;
       }
 
       if (S.isHighlighterTool(tool)) {
@@ -707,53 +1169,25 @@
         this._compositeHlStrokeToHighlight({ clearStroke: true });
         this._hlCommitSnap = null;
         this._hlBBox = null;
-        return;
+        this.clearPreview();
+        return false;
       }
 
       if (S.isFreehandTool(tool)) {
         this.mainCtx.globalCompositeOperation = "source-over";
         this.mainCtx.globalAlpha = 1;
-        return;
+        this.clearPreview();
+        return false;
       }
 
-      if (tool === "line") {
-        this.pushHistory();
-        this.applyFillStrokeStyle(this.mainCtx);
-        this.mainCtx.beginPath();
-        this.mainCtx.moveTo(this.startX, this.startY);
-        this.mainCtx.lineTo(x, y);
-        this.mainCtx.stroke();
-      } else if (tool === "rect") {
-        this.pushHistory();
-        this.applyFillStrokeStyle(this.mainCtx);
-        this.mainCtx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
-      } else if (tool === "table") {
-        this.pushHistory();
-        this.applyFillStrokeStyle(this.mainCtx);
-        this.mainCtx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
-        this._drawTableGrid(this.mainCtx, this.startX, this.startY, x, y);
-      } else if (tool === "axes") {
-        this.pushHistory();
-        this.applyFillStrokeStyle(this.mainCtx);
-        this._drawAxes(this.mainCtx, this.startX, this.startY, x, y);
-      } else if (tool === "arrowLine") {
-        this.pushHistory();
-        this.applyFillStrokeStyle(this.mainCtx);
-        this._drawArrowLine(
-          this.mainCtx,
-          this.startX,
-          this.startY,
-          x,
-          y,
-          this.arrowEnds
-        );
-      } else if (tool === "circle") {
-        this.pushHistory();
-        this.applyFillStrokeStyle(this.mainCtx);
-        this._drawCircle(this.mainCtx, this.startX, this.startY, x, y);
+      if (S.isShapeTool(tool)) {
+        const committed = this._commitShapeFromDrag(tool, this.startX, this.startY, x, y);
+        this.clearPreview();
+        return committed;
       }
 
       this.clearPreview();
+      return false;
     }
 
     _drawArrowHead(ctx, tipX, tipY, angle) {
@@ -795,19 +1229,35 @@
       ctx.stroke();
     }
 
-    _drawAxes(ctx, x1, y1, x2, y2) {
+    _formatCoordLabel(value, step) {
+      const stepNum = Number(step) || 1;
+      const stepStr = String(stepNum);
+      let decimals = 0;
+      if (stepStr.includes(".")) {
+        const frac = stepStr.split(".")[1] || "";
+        decimals = frac.replace(/0+$/, "").length || frac.length;
+      }
+      if (decimals === 0) return String(Math.round(value));
+      return value.toFixed(decimals);
+    }
+
+    _drawAxes(ctx, x1, y1, x2, y2, opts = {}) {
       const left = Math.min(x1, x2);
       const top = Math.min(y1, y2);
       const width = Math.abs(x2 - x1);
       const height = Math.abs(y2 - y1);
-      const showY = !!this.coordShowY;
+      const showY = opts.coordShowY != null ? !!opts.coordShowY : !!this.coordShowY;
       if (width < 8 || (showY && height < 8)) return;
 
       const cx = left + width / 2;
       const cy = top + height / 2;
-      const ticks = Math.max(1, Math.min(20, this.coordTicks));
+      const ticks = Math.max(1, Math.min(20, opts.coordTicks ?? this.coordTicks));
       const tickLen = Math.max(4, Math.min(10, (ctx.lineWidth || 2) * 2));
       const arrow = Math.max(6, tickLen + 2);
+      let coordStart = opts.coordStart != null ? Number(opts.coordStart) : this.coordStart;
+      let coordStep = opts.coordStep != null ? Number(opts.coordStep) : this.coordStep;
+      if (!Number.isFinite(coordStart)) coordStart = 0;
+      if (!Number.isFinite(coordStep) || coordStep <= 0) coordStep = 1;
 
       ctx.beginPath();
       ctx.moveTo(left, cy);
@@ -847,17 +1297,69 @@
         ctx.lineTo(cx + arrow * 0.45, top + arrow);
       }
       ctx.stroke();
+
+      const stepY = height / ticks;
+      const fontSize = Math.max(
+        21,
+        Math.min(
+          (ctx.lineWidth || 2) * 7.5,
+          Math.min(stepX, showY ? stepY : stepX) * 0.825,
+          30
+        )
+      );
+      ctx.save();
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = `${fontSize}px ${S.getTextFontCss()}`;
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      if (showY) {
+        const xOriginLabel = this._formatCoordLabel(coordStart, coordStep);
+        ctx.fillText(xOriginLabel, cx, cy + tickLen + 4);
+        for (let i = 0; i <= ticks; i++) {
+          const x = left + stepX * i;
+          if (Math.abs(x - cx) < 1) continue;
+          const value = coordStart + ((x - cx) / stepX) * coordStep;
+          const label = this._formatCoordLabel(value, coordStep);
+          if (ctx.measureText(label).width > stepX * 0.9) continue;
+          ctx.fillText(label, x, cy + tickLen + 4);
+        }
+      } else {
+        for (let i = 0; i <= ticks; i++) {
+          const x = left + stepX * i;
+          const value = coordStart + i * coordStep;
+          const label = this._formatCoordLabel(value, coordStep);
+          if (ctx.measureText(label).width > stepX * 0.9) continue;
+          ctx.fillText(label, x, cy + tickLen + 4);
+        }
+      }
+
+      if (showY) {
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        const originLabel = this._formatCoordLabel(coordStart, coordStep);
+        ctx.fillText(originLabel, cx - tickLen - 4, cy);
+        for (let i = 0; i <= ticks; i++) {
+          const y = top + stepY * i;
+          if (Math.abs(y - cy) < 1) continue;
+          const value = coordStart + ((cy - y) / stepY) * coordStep;
+          const label = this._formatCoordLabel(value, coordStep);
+          if (ctx.measureText(label).width > stepY * 0.9) continue;
+          ctx.fillText(label, cx - tickLen - 4, y);
+        }
+      }
+      ctx.restore();
     }
 
-    _drawTableGrid(ctx, x1, y1, x2, y2) {
+    _drawTableGrid(ctx, x1, y1, x2, y2, opts = {}) {
       const left = Math.min(x1, x2);
       const top = Math.min(y1, y2);
       const width = Math.abs(x2 - x1);
       const height = Math.abs(y2 - y1);
       if (width < 4 || height < 4) return;
 
-      const cols = Math.max(1, this.tableCols);
-      const rows = Math.max(1, this.tableRows);
+      const cols = Math.max(1, opts.cols ?? this.tableCols);
+      const rows = Math.max(1, opts.rows ?? this.tableRows);
       const colStep = width / cols;
       const rowStep = height / rows;
 
@@ -891,6 +1393,7 @@
       this._popoverTool = null;
       this.settingsPanel = null;
       this._textEditor = null;
+      this._selectedCanvasObject = null;
       this._onMessage = this._onMessage.bind(this);
       this._onKeyDown = this._onKeyDown.bind(this);
     }
@@ -910,11 +1413,17 @@
       highlight.id = "huabi-highlight";
       const main = document.createElement("canvas");
       main.id = "huabi-main";
+      const shape = document.createElement("canvas");
+      shape.id = "huabi-shape";
+      const text = document.createElement("canvas");
+      text.id = "huabi-text";
       const preview = document.createElement("canvas");
       preview.id = "huabi-preview";
 
       wrap.appendChild(highlight);
       wrap.appendChild(main);
+      wrap.appendChild(shape);
+      wrap.appendChild(text);
       wrap.appendChild(preview);
       root.appendChild(wrap);
       root.appendChild(this._buildToolbar());
@@ -925,8 +1434,10 @@
       this.canvasWrap = wrap;
       this.highlightCanvas = highlight;
       this.mainCanvas = main;
+      this.shapeCanvas = shape;
+      this.textCanvas = text;
       this.previewCanvas = preview;
-      this.engine = new DrawingEngine(main, highlight, preview, this.settings);
+      this.engine = new DrawingEngine(main, highlight, shape, text, preview, this.settings);
       this.toolbar = root.querySelector("#huabi-toolbar");
       this.toolPopover = root.querySelector("#huabi-tool-popover");
       this.settingsPanel = new window.HuabiSettingsPanel(root, this);
@@ -950,6 +1461,8 @@
           this.engine.tableRows = next.tableRows ?? 3;
           this.engine.tableCols = next.tableCols ?? 3;
           this.engine.coordTicks = next.coordTicks ?? 5;
+          this.engine.coordStart = next.coordStart ?? 0;
+          this.engine.coordStep = next.coordStep ?? 1;
           this.engine.coordShowY = next.coordShowY === true;
           this.engine.textFontSize = next.textFontSize ?? 0;
           this.engine.arrowEnds = next.arrowEnds === "both" ? "both" : "end";
@@ -1022,7 +1535,7 @@
       const ic = (n) => this._icon(n);
       bar.innerHTML = `
         <span class="huabi-drag-handle" title="拖动">${ic("drag")}</span>
-        <button type="button" id="huabi-mode-toggle" class="huabi-tool-btn huabi-active-tool" title="鼠标模式（点击切换画笔）">${ic("modePointer")}</button>
+        <button type="button" id="huabi-mode-toggle" class="huabi-tool-btn" title="鼠标模式（点击切换画笔）">${ic("modePointer")}</button>
         <span class="huabi-sep"></span>
         ${this._toolBtn("pen1", "huabi-color-btn", "画笔1")}
         ${this._toolBtn("pen2", "huabi-color-btn", "画笔2")}
@@ -1062,16 +1575,20 @@
 
     _styleProfileId(toolId) {
       if (S.isEraserTool(toolId)) return "eraser";
-      if (S.isShapeTool(toolId) || S.isTextTool(toolId)) return this.engine.lastPenTool || "pen1";
+      if (S.isShapeTool(toolId) || S.isTextTool(toolId))
+        return this.engine.lastPenTool || S.DEFAULT_PEN_TOOL;
       return toolId;
     }
 
     _persistSettings() {
       this.settings.toolProfiles = this.engine.toolProfiles;
-      this.settings.lastPenTool = this.engine.lastPenTool || this.settings.lastPenTool || "pen1";
+      this.settings.lastPenTool =
+        this.engine.lastPenTool || this.settings.lastPenTool || S.DEFAULT_PEN_TOOL;
       this.settings.tableRows = this.engine.tableRows;
       this.settings.tableCols = this.engine.tableCols;
       this.settings.coordTicks = this.engine.coordTicks;
+      this.settings.coordStart = this.engine.coordStart;
+      this.settings.coordStep = this.engine.coordStep;
       this.settings.coordShowY = this.engine.coordShowY;
       this.settings.textFontSize = this.engine.textFontSize;
       this.settings.arrowEnds = this.engine.arrowEnds;
@@ -1265,6 +1782,30 @@
           })
         );
         fields.appendChild(
+          this._popoverNumberRow(
+            "起始值",
+            this.engine.coordStart,
+            (v) => {
+              this.engine.coordStart = v;
+              this.settings.coordStart = v;
+              this._persistToolProfiles();
+            },
+            { min: -10000, max: 10000 }
+          )
+        );
+        fields.appendChild(
+          this._popoverNumberRow(
+            "跨度",
+            this.engine.coordStep,
+            (v) => {
+              this.engine.coordStep = v;
+              this.settings.coordStep = v;
+              this._persistToolProfiles();
+            },
+            { min: 0.1, max: 10000, step: "any" }
+          )
+        );
+        fields.appendChild(
           this._popoverCheckboxRow("显示 Y 轴", this.engine.coordShowY, (on) => {
             this.engine.coordShowY = on;
             this.settings.coordShowY = on;
@@ -1273,7 +1814,9 @@
         );
         body.appendChild(fields);
         body.appendChild(
-          this._popoverHint("默认仅 X 轴；勾选 Y 轴后为完整坐标系。拖拽划定区域。")
+          this._popoverHint(
+            "仅 X 轴：从左起按「起始 + i×跨度」标注（默认 0,1,2…）。勾选 Y 轴后：交点为原点，X 下左负右正，Y 左侧上正下负。拖拽划定区域。"
+          )
         );
       }
 
@@ -1304,8 +1847,14 @@
         body.appendChild(fields);
         body.appendChild(
           this._popoverHint(
-            "点击页面输入文字；Enter 确认，Shift+Enter 换行。设为 0 时使用网页默认字号 + 8px；字体为寒蝉手拙体。"
+            "画笔模式：点击空白新建，单击选中拖动，双击编辑。鼠标模式：点网页操作页面，点中文字/形状可选中拖动。形状与文字橡皮擦擦不掉，Delete/Backspace 删除选中项。升级前旧标注不可点选。"
           )
+        );
+      }
+
+      if (S.isShapeTool(toolId)) {
+        body.appendChild(
+          this._popoverHint("绘制完成后自动切换为鼠标模式，便于选中、移动与删除。")
         );
       }
 
@@ -1378,10 +1927,14 @@
       input.max = String(max);
       input.value = String(value);
       const sync = () => {
-        const v = Math.max(min, Math.min(max, Number(input.value) || min));
+        const raw = Number(input.value);
+        const v = Number.isFinite(raw)
+          ? Math.max(min, Math.min(max, raw))
+          : min;
         input.value = String(v);
         onChange(v);
       };
+      if (opts.step != null) input.step = String(opts.step);
       input.addEventListener("change", sync);
       row.appendChild(span);
       row.appendChild(input);
@@ -1436,16 +1989,18 @@
       const engine = this.engine;
       const bar = this.toolbar;
 
+      const activeTool = engine.tool;
       bar.querySelectorAll("[data-tool]").forEach((b) => {
-        b.classList.toggle("huabi-active-tool", b.dataset.tool === engine.tool);
+        b.classList.toggle("huabi-active-tool", b.dataset.tool === activeTool);
       });
 
       const modeBtn = bar.querySelector("#huabi-mode-toggle");
       if (modeBtn) {
-        modeBtn.classList.toggle("huabi-active-tool", !this.brushMode);
+        modeBtn.classList.remove("huabi-active-tool");
+        modeBtn.classList.toggle("huabi-mode-active", !this.brushMode);
         modeBtn.title = this.brushMode
           ? "画笔模式（点击切换为鼠标）"
-          : "鼠标模式（点击切换为画笔）";
+          : "鼠标模式：点网页操作页面，点中标注可选中移动（点击切换为画笔）";
       }
 
       const visBtn = bar.querySelector("#huabi-toggle-visibility");
@@ -1462,7 +2017,7 @@
     _getBrushCursorColor() {
       const tool = this.engine.tool;
       let t = tool;
-      if (S.isShapeTool(tool) || S.isTextTool(tool)) t = this.engine.lastPenTool || "pen1";
+      if (S.isShapeTool(tool) || S.isTextTool(tool)) t = this.engine.lastPenTool || S.DEFAULT_PEN_TOOL;
       if (S.isEraserTool(tool)) return "#252423";
       return this.engine.getProfile(t).color || "#252423";
     }
@@ -1491,37 +2046,185 @@
     _updateCanvasCursors(toolId) {
       const id = toolId || this.engine.tool;
       const isEraser = id === "eraser";
-      this.root.classList.toggle("huabi-tool-eraser", isEraser);
+      const eraserActive = this.brushMode && isEraser;
+      this.root.classList.toggle("huabi-tool-eraser", eraserActive);
 
       let cursor = "default";
-      if (this.active && C) {
+      if (this.active && this.brushMode && C) {
         if (isEraser) {
           const er = this.engine.getProfile("eraser");
           cursor = C.eraser(Math.max(er.lineWidth || 16, 8));
-        } else if (this.brushMode) {
-          if (S.isTextTool(id)) {
-            cursor = "text";
-          } else {
-            const color = this._getBrushCursorColor();
-            if (S.isPenTool(id)) cursor = C.pen(color);
-            else if (S.isHighlighterTool(id)) cursor = C.highlighter(color);
-            else cursor = C.brush(color);
-          }
+        } else if (S.isTextTool(id)) {
+          cursor = "text";
+        } else {
+          const color = this._getBrushCursorColor();
+          if (S.isPenTool(id)) cursor = C.pen(color);
+          else if (S.isHighlighterTool(id)) cursor = C.highlighter(color);
+          else cursor = C.brush(color);
         }
       }
 
-      [this.canvasWrap, this.highlightCanvas, this.mainCanvas, this.previewCanvas].forEach((el) => {
-        if (!el) return;
-        el.classList.toggle("huabi-eraser-active", isEraser);
-        if (this.active && (this.brushMode || isEraser)) {
-          el.style.setProperty("cursor", cursor, "important");
-        } else {
-          el.style.removeProperty("cursor");
+      [
+        this.canvasWrap,
+        this.highlightCanvas,
+        this.mainCanvas,
+        this.shapeCanvas,
+        this.textCanvas,
+        this.previewCanvas,
+      ].forEach(
+        (el) => {
+          if (!el) return;
+          el.classList.toggle("huabi-eraser-active", eraserActive);
+          if (this.active && this.brushMode) {
+            el.style.setProperty("cursor", cursor, "important");
+          } else {
+            el.style.removeProperty("cursor");
+          }
         }
+      );
+    }
+
+    _clearCanvasSelection() {
+      this._selectedCanvasObject = null;
+      this.engine?.clearPreview();
+    }
+
+    _selectionBounds(sel) {
+      if (!sel) return null;
+      if (sel.kind === "text") {
+        const t = this.engine.textItems.find((i) => i.id === sel.id);
+        if (!t) return null;
+        return { left: t.x, top: t.y, width: t.w, height: t.h };
+      }
+      const s = this.engine.shapeItems.find((i) => i.id === sel.id);
+      if (!s) return null;
+      const b = this.engine._shapeBounds(s);
+      return { left: b.left, top: b.top, width: b.width, height: b.height };
+    }
+
+    _renderCanvasSelection() {
+      this.engine.clearPreview();
+      const bounds = this._selectionBounds(this._selectedCanvasObject);
+      if (!bounds) {
+        this._selectedCanvasObject = null;
+        return;
+      }
+      const ctx = this.engine.previewCtx;
+      const pad = 4;
+      ctx.save();
+      ctx.strokeStyle = "#0078d4";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(
+        bounds.left - pad,
+        bounds.top - pad,
+        bounds.width + pad * 2,
+        bounds.height + pad * 2
+      );
+      ctx.restore();
+    }
+
+    _selectCanvasObject(hit) {
+      this._selectedCanvasObject = { kind: hit.kind, id: hit.item.id };
+      this._renderCanvasSelection();
+    }
+
+    _deleteSelectedCanvasObject() {
+      const sel = this._selectedCanvasObject;
+      if (!sel) return;
+      if (sel.kind === "text") {
+        if (!this.engine.textItems.some((t) => t.id === sel.id)) {
+          this._clearCanvasSelection();
+          return;
+        }
+        this.engine.pushHistory();
+        this.engine.removeTextItem(sel.id);
+        this.engine.renderTexts();
+      } else {
+        if (!this.engine.shapeItems.some((s) => s.id === sel.id)) {
+          this._clearCanvasSelection();
+          return;
+        }
+        this.engine.pushHistory();
+        this.engine.removeShapeItem(sel.id);
+        this.engine.renderShapes();
+      }
+      this._clearCanvasSelection();
+    }
+
+    _isPageInteractive(el) {
+      if (!el?.closest) return false;
+      if (el.closest("#huabi-root")) return false;
+      return !!el.closest(
+        'button, a[href], input, select, textarea, label, summary, [role="button"], [onclick], [class*="close"], .el-dialog__close, .el-dialog__headerbtn, .ant-modal-close, .anticon-close'
+      );
+    }
+
+    _resolvePagePassTarget(el) {
+      if (!el) return null;
+      const interactive = el.closest(
+        'button, a[href], input, select, textarea, label, summary, [role="button"], [onclick], [class*="close"], .el-dialog__close, .el-dialog__headerbtn, .ant-modal-close'
+      );
+      if (interactive && !interactive.closest("#huabi-root")) return interactive;
+      if (!el.closest("#huabi-root")) return el;
+      return null;
+    }
+
+    _findPagePassTarget(clientX, clientY) {
+      const stack = document.elementsFromPoint(clientX, clientY);
+      let fallback = null;
+      for (const el of stack) {
+        if (!el?.closest || el.closest("#huabi-root")) continue;
+        if (!fallback) fallback = el;
+        if (this._isPageInteractive(el)) {
+          return this._resolvePagePassTarget(el);
+        }
+      }
+      return this._resolvePagePassTarget(fallback);
+    }
+
+    _clickPageTarget(target, e) {
+      const el = this._resolvePagePassTarget(target);
+      if (!el) return;
+      const opts = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        screenX: e.screenX,
+        screenY: e.screenY,
+        button: 0,
+        buttons: 0,
+      };
+      try {
+        if (typeof el.click === "function") {
+          el.click();
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      el.dispatchEvent(new MouseEvent("mousedown", opts));
+      el.dispatchEvent(new MouseEvent("mouseup", opts));
+      el.dispatchEvent(new MouseEvent("click", opts));
+    }
+
+    _openTextEditorForItem(item) {
+      this._clearCanvasSelection();
+      this._openTextEditor(item.x, item.y, {
+        editId: item.id,
+        initialText: item.text,
+        fontSize: item.fontSize,
+        color: item.color,
       });
     }
 
     selectTool(toolId) {
+      this._stopObjectDrag?.();
+      if (toolId !== "text") {
+        this._clearCanvasSelection();
+      }
       if (toolId !== "text") this._closeTextEditor(false);
       if (this._popoverTool && this._popoverTool !== toolId) {
         this._closeToolPopover();
@@ -1547,13 +2250,17 @@
       if (modeBtn) {
         modeBtn.title = this.brushMode
           ? "画笔模式（点击切换为鼠标）"
-          : "鼠标模式（点击切换为画笔）";
+          : "鼠标模式：点网页操作页面，点中标注可选中移动（点击切换为画笔）";
       }
+      if (this._selectedCanvasObject) this._renderCanvasSelection();
       this.syncToolbarFromTool();
     }
 
     toggleBrushMode() {
       this.brushMode = !this.brushMode;
+      if (!this.brushMode) {
+        this.root?.classList.remove("huabi-drawing", "huabi-erasing");
+      }
       this.applyBrushModeUI();
     }
 
@@ -1570,30 +2277,53 @@
 
     _closeTextEditor(commit) {
       if (!this._textEditor) return;
-      const { el, x, y } = this._textEditor;
+      const { el, x, y, onOutsideDown, editId, fontSize, color } = this._textEditor;
+      if (onOutsideDown) {
+        window.removeEventListener("pointerdown", onOutsideDown, true);
+      }
       const text = el.value;
       el.parentElement?.remove();
       this._textEditor = null;
       this.root?.classList.remove("huabi-text-editing");
-      if (commit && text.trim()) {
-        this._commitTextToCanvas(text, x, y);
+      if (commit) {
+        if (text.trim()) {
+          this._commitTextToCanvas(text, x, y, { editId, fontSize, color });
+        } else if (editId) {
+          this.engine.pushHistory();
+          this.engine.renderTexts();
+        }
+      } else if (editId) {
+        this.engine.undo();
       }
     }
 
-    async _commitTextToCanvas(text, x, y) {
+    async _commitTextToCanvas(text, x, y, opts = {}) {
+      const { editId, fontSize: fs, color: col } = opts;
       await S.ensureTextFont();
-      const fontSize = S.resolveTextFontSize(this.settings, this.engine);
-      const color = this.engine.getProfile(this.engine.lastPenTool || "pen1").color;
+      const fontSize = fs ?? S.resolveTextFontSize(this.settings, this.engine);
+      const color = col ?? this.engine.getProfile(this.engine.lastPenTool || S.DEFAULT_PEN_TOOL).color;
       this.engine.pushHistory();
-      this.engine.drawText(text, x, y, fontSize, color);
+      if (editId) {
+        this.engine.updateTextItem(editId, { text, x, y, fontSize, color });
+      } else {
+        this.engine.addTextItem({ text, x, y, fontSize, color });
+      }
+      this.engine.renderTexts();
     }
 
-    async _openTextEditor(x, y) {
+    async _openTextEditor(x, y, opts = {}) {
       this._closeTextEditor(false);
       this._closeToolPopover();
       await S.ensureTextFont();
-      const fontSize = S.resolveTextFontSize(this.settings, this.engine);
-      const color = this.engine.getProfile(this.engine.lastPenTool || "pen1").color;
+      const editId = opts.editId ?? null;
+      const fontSize = opts.fontSize ?? S.resolveTextFontSize(this.settings, this.engine);
+      const color =
+        opts.color ?? this.engine.getProfile(this.engine.lastPenTool || S.DEFAULT_PEN_TOOL).color;
+      if (editId) {
+        this.engine.pushHistory();
+        this.engine.removeTextItem(editId);
+        this.engine.renderTexts();
+      }
       const wrap = document.createElement("div");
       wrap.className = "huabi-text-editor-wrap";
       const ta = document.createElement("textarea");
@@ -1603,32 +2333,39 @@
       ta.style.fontFamily = S.getTextFontCss();
       ta.style.fontSize = `${fontSize}px`;
       ta.style.color = color;
+      if (opts.initialText) ta.value = opts.initialText;
       wrap.style.left = `${Math.max(8, Math.min(x, window.innerWidth - 160))}px`;
       wrap.style.top = `${Math.max(8, Math.min(y, window.innerHeight - 48))}px`;
       wrap.appendChild(ta);
+      wrap.addEventListener("pointerdown", (ev) => {
+        if (ev.target !== ta) {
+          ev.preventDefault();
+          ta.focus();
+        }
+      });
       this.root.appendChild(wrap);
-      this._textEditor = { el: ta, x, y };
+      const onOutsideDown = (ev) => {
+        if (!this._textEditor) return;
+        if (ev.target.closest(".huabi-text-editor-wrap")) return;
+        this._closeTextEditor(true);
+      };
+      window.addEventListener("pointerdown", onOutsideDown, true);
+      this._textEditor = { el: ta, x, y, onOutsideDown, editId, fontSize, color };
       this.root.classList.add("huabi-text-editing");
-      const commit = () => this._closeTextEditor(true);
       ta.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape") {
           ev.preventDefault();
           ev.stopPropagation();
           this._closeTextEditor(false);
-        } else if (ev.key === "Enter" && !ev.shiftKey) {
-          ev.preventDefault();
-          commit();
         }
       });
-      ta.addEventListener("blur", () => commit(), { once: true });
       requestAnimationFrame(() => ta.focus());
     }
 
     _canCanvasInteract() {
       if (!this.active) return false;
       if (this.brushMode) return true;
-      const tool = this._getToolbarToolId() || this.engine.tool;
-      return tool === "eraser";
+      return true;
     }
 
     _bindCanvasEvents(wrap) {
@@ -1645,6 +2382,108 @@
         window.removeEventListener("mouseup", up, true);
       };
 
+      const OBJECT_DRAG_THRESHOLD = 4;
+      const PAGE_CLICK_MOVE_THRESHOLD = 6;
+      let objectDrag = null;
+      let pagePassTarget = null;
+      let pagePassStartX = 0;
+      let pagePassStartY = 0;
+
+      const stopObjectTrack = () => {
+        window.removeEventListener("pointermove", objectMove, true);
+        window.removeEventListener("pointerup", objectUp, true);
+        window.removeEventListener("pointercancel", objectUp, true);
+        window.removeEventListener("mousemove", objectMove, true);
+        window.removeEventListener("mouseup", objectUp, true);
+        objectDrag = null;
+        pagePassTarget = null;
+        pagePassStartX = 0;
+        pagePassStartY = 0;
+        this.root?.classList.remove("huabi-object-dragging");
+      };
+
+      const startObjectDrag = (hit, x, y) => {
+        this._selectCanvasObject(hit);
+        stopObjectTrack();
+        if (hit.kind === "text") {
+          objectDrag = {
+            kind: "text",
+            id: hit.item.id,
+            pointerX: x,
+            pointerY: y,
+            itemX: hit.item.x,
+            itemY: hit.item.y,
+            dragging: false,
+          };
+        } else {
+          objectDrag = {
+            kind: "shape",
+            id: hit.item.id,
+            pointerX: x,
+            pointerY: y,
+            x1: hit.item.x1,
+            y1: hit.item.y1,
+            x2: hit.item.x2,
+            y2: hit.item.y2,
+            dragging: false,
+          };
+        }
+        window.addEventListener("pointermove", objectMove, true);
+        window.addEventListener("pointerup", objectUp, true);
+        window.addEventListener("pointercancel", objectUp, true);
+        window.addEventListener("mousemove", objectMove, true);
+        window.addEventListener("mouseup", objectUp, true);
+      };
+
+      const objectMove = (e) => {
+        if (pagePassTarget && !objectDrag) return;
+        if (!objectDrag) return;
+        const { x, y } = this.engine.getPos(e);
+        const dx = x - objectDrag.pointerX;
+        const dy = y - objectDrag.pointerY;
+        if (!objectDrag.dragging) {
+          if (Math.hypot(dx, dy) < OBJECT_DRAG_THRESHOLD) return;
+          objectDrag.dragging = true;
+          this.engine.pushHistory();
+          this.root?.classList.add("huabi-object-dragging");
+        }
+        if (objectDrag.kind === "text") {
+          this.engine.updateTextItem(objectDrag.id, {
+            x: objectDrag.itemX + dx,
+            y: objectDrag.itemY + dy,
+          });
+          this.engine.renderTexts();
+        } else {
+          this.engine.updateShapeItem(objectDrag.id, {
+            x1: objectDrag.x1 + dx,
+            y1: objectDrag.y1 + dy,
+            x2: objectDrag.x2 + dx,
+            y2: objectDrag.y2 + dy,
+          });
+          this.engine.renderShapes();
+        }
+        this._renderCanvasSelection();
+        e.preventDefault();
+      };
+
+      const objectUp = (e) => {
+        if (objectDrag) {
+          if (e.button !== 0 && e.type === "mouseup") return;
+          stopObjectTrack();
+          e.preventDefault();
+          return;
+        }
+        if (pagePassTarget) {
+          if (e.button !== 0 && e.type === "mouseup") return;
+          const moved = Math.hypot(e.clientX - pagePassStartX, e.clientY - pagePassStartY);
+          if (moved <= PAGE_CLICK_MOVE_THRESHOLD) {
+            this._clickPageTarget(pagePassTarget, e);
+          }
+          stopObjectTrack();
+          e.preventDefault();
+        }
+      };
+
       const bindDown = (e) => {
         if (!this._canCanvasInteract()) return;
         if (this._textEditor) return;
@@ -1652,13 +2491,57 @@
         if (skipTarget(e.target)) return;
         if (e.button !== 0) return;
         const toolId = this._resolveActiveToolId();
-        if (toolId === "text") {
-          const { x, y } = this.engine.getPos(e);
-          this._openTextEditor(x, y);
+        const { x, y } = this.engine.getPos(e);
+
+        if (!this.brushMode) {
+          const pageTarget = this._findPagePassTarget(e.clientX, e.clientY);
+          const pageControl = pageTarget && this._isPageInteractive(pageTarget);
+          const hit = pageControl ? null : this.engine.hitTestCanvasObject(x, y);
+          if (hit) {
+            startObjectDrag(hit, x, y);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          if (!pageTarget) return;
+          if (this._selectedCanvasObject) this._clearCanvasSelection();
+          pagePassTarget = pageTarget;
+          pagePassStartX = e.clientX;
+          pagePassStartY = e.clientY;
+          window.addEventListener("pointermove", objectMove, true);
+          window.addEventListener("pointerup", objectUp, true);
+          window.addEventListener("pointercancel", objectUp, true);
+          window.addEventListener("mousemove", objectMove, true);
+          window.addEventListener("mouseup", objectUp, true);
           e.preventDefault();
           e.stopPropagation();
           return;
         }
+
+        if (toolId === "text") {
+          const hit = this.engine.hitTestText(x, y);
+          if (hit) {
+            startObjectDrag(hit, x, y);
+          } else {
+            stopObjectTrack();
+            this._clearCanvasSelection();
+            this._openTextEditor(x, y);
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+
+        if (S.isShapeTool(toolId)) {
+          const hit = this.engine.hitTestCanvasObject(x, y);
+          if (hit) {
+            startObjectDrag(hit, x, y);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+        }
+
         const isEraser = toolId === "eraser";
         this._canvasPointerActive = true;
         this.root.classList.add("huabi-drawing");
@@ -1691,7 +2574,9 @@
       const up = (e) => {
         if (!this._canvasPointerActive && !this.engine.isDrawing) return;
         if (e.button !== 0 && e.type === "mouseup") return;
-        this.engine.onPointerUp(e);
+        if (this.engine.onPointerUp(e)) {
+          this.setBrushMode(false);
+        }
         this._canvasPointerActive = false;
         this.root.classList.remove("huabi-drawing", "huabi-erasing");
         this._updateCanvasCursors();
@@ -1708,6 +2593,26 @@
       };
 
       wrap.addEventListener("pointerdown", bindDown, true);
+
+      wrap.addEventListener(
+        "dblclick",
+        (e) => {
+          if (!this._canCanvasInteract()) return;
+          if (this._textEditor) return;
+          if (this.settingsPanel?.visible) return;
+          if (skipTarget(e.target)) return;
+          const { x, y } = this.engine.getPos(e);
+          const hit = this.engine.hitTestText(x, y);
+          if (!hit) return;
+          if (this.brushMode && this._resolveActiveToolId() !== "text") return;
+          this._openTextEditorForItem(hit.item);
+          e.preventDefault();
+          e.stopPropagation();
+        },
+        true
+      );
+
+      this._stopObjectDrag = stopObjectTrack;
     }
 
     _bindToolbarDrag() {
@@ -1806,13 +2711,16 @@
       bar.querySelector("#huabi-undo").addEventListener("click", (e) => {
         e.stopPropagation();
         engine.undo();
+        this._clearCanvasSelection();
       });
       bar.querySelector("#huabi-redo").addEventListener("click", (e) => {
         e.stopPropagation();
         engine.redo();
+        this._clearCanvasSelection();
       });
       bar.querySelector("#huabi-clear").addEventListener("click", (e) => {
         e.stopPropagation();
+        this._clearCanvasSelection();
         engine.clear();
       });
       bar.querySelector("#huabi-toggle-visibility").addEventListener("click", (e) => {
@@ -1866,6 +2774,26 @@
         return;
       }
 
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (this._selectedCanvasObject) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._deleteSelectedCanvasObject();
+          return;
+        }
+      }
+      if (e.key === "Enter" && this._selectedCanvasObject?.kind === "text") {
+        const item = this.engine.textItems.find(
+          (t) => t.id === this._selectedCanvasObject.id
+        );
+        if (item) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._openTextEditorForItem(item);
+          return;
+        }
+      }
+
       if (!this.brushMode) {
         if (K.matchShortcut(e, shortcuts.eraser)) {
           e.preventDefault();
@@ -1888,17 +2816,20 @@
         e.preventDefault();
         e.stopPropagation();
         this.engine.undo();
+        this._clearCanvasSelection();
         return;
       }
       if (K.matchShortcut(e, shortcuts.redo)) {
         e.preventDefault();
         e.stopPropagation();
         this.engine.redo();
+        this._clearCanvasSelection();
         return;
       }
       if (shortcuts.clear && K.matchShortcut(e, shortcuts.clear)) {
         e.preventDefault();
         e.stopPropagation();
+        this._clearCanvasSelection();
         this.engine.clear();
         return;
       }
@@ -1937,19 +2868,22 @@
         this.engine.tableRows = this.settings.tableRows ?? 3;
         this.engine.tableCols = this.settings.tableCols ?? 3;
         this.engine.coordTicks = this.settings.coordTicks ?? 5;
+        this.engine.coordStart = this.settings.coordStart ?? 0;
+        this.engine.coordStep = this.settings.coordStep ?? 1;
         this.engine.coordShowY = this.settings.coordShowY === true;
         this.engine.textFontSize = this.settings.textFontSize ?? 0;
         this.engine.arrowEnds =
           this.settings.arrowEnds === "both" ? "both" : "end";
         this.engine.resize();
         this.setBrushMode(true);
-        this.selectTool("pen1");
+        this.selectTool(this.settings.lastPenTool || S.DEFAULT_PEN_TOOL);
         this._updatePenButtonColors();
       } else {
         this.setBrushMode(false);
         this.settingsPanel.hide();
         this._closeToolPopover();
         this._closeTextEditor(false);
+        this._clearCanvasSelection();
         this.canvasWrap.classList.remove("huabi-notes-hidden");
         this.notesHidden = false;
       }
@@ -1980,6 +2914,8 @@
       const tctx = tmp.getContext("2d");
       tctx.drawImage(this.highlightCanvas, 0, 0);
       tctx.drawImage(this.mainCanvas, 0, 0);
+      tctx.drawImage(this.shapeCanvas, 0, 0);
+      tctx.drawImage(this.textCanvas, 0, 0);
       const url = tmp.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = url;
@@ -2004,14 +2940,18 @@
         S.loadSettings().then((s) => {
           this.settings = s;
           this.engine.toolProfiles = s.toolProfiles;
-          this.engine.lastPenTool = s.lastPenTool || "pen1";
+          this.engine.lastPenTool = s.lastPenTool || S.DEFAULT_PEN_TOOL;
           this.engine.tableRows = s.tableRows ?? 3;
           this.engine.tableCols = s.tableCols ?? 3;
           this.engine.coordTicks = s.coordTicks ?? 5;
+          this.engine.coordStart = s.coordStart ?? 0;
+          this.engine.coordStep = s.coordStep ?? 1;
           this.engine.coordShowY = s.coordShowY === true;
           this.settings.tableRows = s.tableRows ?? 3;
           this.settings.tableCols = s.tableCols ?? 3;
           this.settings.coordTicks = s.coordTicks ?? 5;
+          this.settings.coordStart = s.coordStart ?? 0;
+          this.settings.coordStep = s.coordStep ?? 1;
           this.settings.coordShowY = s.coordShowY === true;
           this.engine.textFontSize = s.textFontSize ?? 0;
           this.settings.textFontSize = s.textFontSize ?? 0;

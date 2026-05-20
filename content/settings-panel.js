@@ -57,10 +57,12 @@
         onSave: async (s) => {
           this.overlay.settings = s;
           this.overlay.engine.toolProfiles = s.toolProfiles;
-          this.overlay.engine.lastPenTool = s.lastPenTool || "pen1";
+          this.overlay.engine.lastPenTool = s.lastPenTool || S.DEFAULT_PEN_TOOL;
           this.overlay.engine.tableRows = s.tableRows ?? 3;
           this.overlay.engine.tableCols = s.tableCols ?? 3;
           this.overlay.engine.coordTicks = s.coordTicks ?? 5;
+          this.overlay.engine.coordStart = s.coordStart ?? 0;
+          this.overlay.engine.coordStep = s.coordStep ?? 1;
           this.overlay.engine.coordShowY = s.coordShowY === true;
           this.overlay.engine.textFontSize = s.textFontSize ?? 0;
           this.overlay.engine.arrowEnds =

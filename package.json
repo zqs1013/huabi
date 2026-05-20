@@ -1,0 +1,15 @@
+{
+  "name": "huabi",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "icons": "node scripts/generate-icons.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}
