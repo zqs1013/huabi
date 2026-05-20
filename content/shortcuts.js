@@ -34,6 +34,7 @@
     if (!str) return "未设置";
     return str
       .replace(/Control/g, "Ctrl")
+      .replace(/Digit/g, "")
       .replace(/Key/g, "")
       .replace(/Space/g, "空格")
       .replace(/Shift\+/g, "Shift+");

@@ -25,7 +25,9 @@
       btnClose.title = "关闭";
       btnClose.innerHTML = `<span class="huabi-icon"></span>`;
       window.HuabiIcons.setIcon(btnClose.querySelector(".huabi-icon"), "close");
-      btnClose.addEventListener("click", () => this.hide());
+      btnClose.addEventListener("click", () => {
+        this.hide();
+      });
       header.appendChild(btnClose);
 
       this.body = document.createElement("div");
@@ -41,7 +43,7 @@
       });
 
       this._onEsc = (e) => {
-        if (e.key === "Escape" && this.visible) this.hide();
+        if (e.key === "Escape" && this.visible) void this.hide();
       };
     }
 
@@ -58,6 +60,9 @@
           this.overlay.engine.lastPenTool = s.lastPenTool || "pen1";
           this.overlay.engine.tableRows = s.tableRows ?? 3;
           this.overlay.engine.tableCols = s.tableCols ?? 3;
+          this.overlay.engine.coordTicks = s.coordTicks ?? 5;
+          this.overlay.engine.coordShowY = s.coordShowY === true;
+          this.overlay.engine.textFontSize = s.textFontSize ?? 0;
           this.overlay.syncToolbarFromTool();
           this.overlay._updatePenButtonColors();
         },
@@ -70,7 +75,14 @@
       this._positionPanel();
     }
 
-    hide() {
+    async hide() {
+      if (this.formApi?.flushSave) {
+        try {
+          await this.formApi.flushSave();
+        } catch {
+          /* ignore */
+        }
+      }
       this.visible = false;
       this.backdrop.hidden = true;
       this.panel.hidden = true;

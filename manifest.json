@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Huabi 网页画笔",
-  "version": "1.6.5",
-  "description": "在网页上自由标注：画笔、直线、矩形、表格、荧光笔等",
+  "version": "1.7.2",
+  "description": "在网页上自由标注：画笔、直线、矩形、表格、荧光笔、文字等",
   "permissions": ["storage", "activeTab"],
   "action": {
     "default_popup": "popup/popup.html",
@@ -30,6 +30,7 @@
       "js": [
         "content/settings.js",
         "content/shortcuts.js",
+        "content/icons.generated.js",
         "content/icons.js",
         "content/cursors.js",
         "content/settings-form.js",
@@ -37,9 +38,16 @@
         "content/overlay.js"
       ],
       "css": [
+        "content/fonts.css",
         "content/inject.css",
         "content/toolbar.css",
         "content/settings-panel.css"
+      ],
+      "web_accessible_resources": [
+        {
+          "resources": ["content/fonts/*"],
+          "matches": ["<all_urls>"]
+        }
       ],
       "run_at": "document_idle"
     }

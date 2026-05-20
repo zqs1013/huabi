@@ -29,6 +29,9 @@
       this.lastY = 0;
       this.tableRows = settings.tableRows ?? 3;
       this.tableCols = settings.tableCols ?? 3;
+      this.coordTicks = settings.coordTicks ?? 5;
+      this.coordShowY = settings.coordShowY === true;
+      this.textFontSize = settings.textFontSize ?? 0;
       this.history = [];
       this.redoStack = [];
       this._erasing = false;
@@ -48,6 +51,9 @@
       this.lastPenTool = settings.lastPenTool || "pen1";
       this.tableRows = settings.tableRows ?? 3;
       this.tableCols = settings.tableCols ?? 3;
+      this.coordTicks = settings.coordTicks ?? 5;
+      this.coordShowY = settings.coordShowY === true;
+      this.textFontSize = settings.textFontSize ?? 0;
     }
 
     getProfile(toolId) {
@@ -70,8 +76,24 @@
     }
 
     getActiveStyle() {
-      const target = S.isShapeTool(this.tool) ? this.lastPenTool : this.getStyleTargetTool();
+      const target =
+        S.isShapeTool(this.tool) || S.isTextTool(this.tool)
+          ? this.lastPenTool
+          : this.getStyleTargetTool();
       return this.getProfile(target);
+    }
+
+    drawText(text, x, y, fontSize, color) {
+      const ctx = this.mainCtx;
+      const lineHeight = fontSize * 1.25;
+      ctx.save();
+      ctx.font = `${fontSize}px ${S.TEXT_FONT_CSS}`;
+      ctx.fillStyle = color;
+      ctx.textBaseline = "top";
+      text.split("\n").forEach((line, i) => {
+        ctx.fillText(line, x, y + i * lineHeight);
+      });
+      ctx.restore();
     }
 
     resize() {
@@ -572,6 +594,8 @@
       } else if (tool === "table") {
         ctx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
         this._drawTableGrid(ctx, this.startX, this.startY, x, y);
+      } else if (tool === "axes") {
+        this._drawAxes(ctx, this.startX, this.startY, x, y);
       }
     }
 
@@ -619,9 +643,67 @@
         this.applyFillStrokeStyle(this.mainCtx);
         this.mainCtx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
         this._drawTableGrid(this.mainCtx, this.startX, this.startY, x, y);
+      } else if (tool === "axes") {
+        this.pushHistory();
+        this.applyFillStrokeStyle(this.mainCtx);
+        this._drawAxes(this.mainCtx, this.startX, this.startY, x, y);
       }
 
       this.clearPreview();
+    }
+
+    _drawAxes(ctx, x1, y1, x2, y2) {
+      const left = Math.min(x1, x2);
+      const top = Math.min(y1, y2);
+      const width = Math.abs(x2 - x1);
+      const height = Math.abs(y2 - y1);
+      const showY = !!this.coordShowY;
+      if (width < 8 || (showY && height < 8)) return;
+
+      const cx = left + width / 2;
+      const cy = top + height / 2;
+      const ticks = Math.max(1, Math.min(20, this.coordTicks));
+      const tickLen = Math.max(4, Math.min(10, (ctx.lineWidth || 2) * 2));
+      const arrow = Math.max(6, tickLen + 2);
+
+      ctx.beginPath();
+      ctx.moveTo(left, cy);
+      ctx.lineTo(left + width, cy);
+      if (showY) {
+        ctx.moveTo(cx, top);
+        ctx.lineTo(cx, top + height);
+      }
+      ctx.stroke();
+
+      const stepX = width / ticks;
+      ctx.beginPath();
+      for (let i = 1; i < ticks; i++) {
+        const x = left + stepX * i;
+        ctx.moveTo(x, cy - tickLen);
+        ctx.lineTo(x, cy + tickLen);
+      }
+      if (showY) {
+        const stepY = height / ticks;
+        for (let i = 1; i < ticks; i++) {
+          const y = top + stepY * i;
+          ctx.moveTo(cx - tickLen, y);
+          ctx.lineTo(cx + tickLen, y);
+        }
+      }
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(left + width, cy);
+      ctx.lineTo(left + width - arrow, cy - arrow * 0.45);
+      ctx.moveTo(left + width, cy);
+      ctx.lineTo(left + width - arrow, cy + arrow * 0.45);
+      if (showY) {
+        ctx.moveTo(cx, top);
+        ctx.lineTo(cx - arrow * 0.45, top + arrow);
+        ctx.moveTo(cx, top);
+        ctx.lineTo(cx + arrow * 0.45, top + arrow);
+      }
+      ctx.stroke();
     }
 
     _drawTableGrid(ctx, x1, y1, x2, y2) {
@@ -665,6 +747,7 @@
       this.toolPopover = null;
       this._popoverTool = null;
       this.settingsPanel = null;
+      this._textEditor = null;
       this._onMessage = this._onMessage.bind(this);
       this._onKeyDown = this._onKeyDown.bind(this);
     }
@@ -716,17 +799,23 @@
       });
 
       chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== "sync" || !changes[S.SETTINGS_KEY]) return;
+        if ((area !== "sync" && area !== "local") || !changes[S.SETTINGS_KEY]) return;
         const next = changes[S.SETTINGS_KEY].newValue;
         if (next) {
           this.settings = next;
           this.engine.applySettings(next);
           this.engine.tableRows = next.tableRows ?? 3;
           this.engine.tableCols = next.tableCols ?? 3;
+          this.engine.coordTicks = next.coordTicks ?? 5;
+          this.engine.coordShowY = next.coordShowY === true;
+          this.engine.textFontSize = next.textFontSize ?? 0;
           this.syncToolbarFromTool();
           this._updatePenButtonColors();
+          this._applyToolbarPosition();
         }
       });
+
+      this._applyToolbarPosition();
 
       chrome.runtime.onMessage.addListener(this._onMessage);
     }
@@ -745,6 +834,8 @@
         line: "line",
         rect: "rect",
         table: "table",
+        axes: "axes",
+        text: "text",
         eraser: "eraser",
       };
       return `
@@ -769,6 +860,8 @@
         ${this._toolBtn("line", "", "直线")}
         ${this._toolBtn("rect", "", "矩形")}
         ${this._toolBtn("table", "", "表格")}
+        ${this._toolBtn("axes", "", "坐标系")}
+        ${this._toolBtn("text", "", "文字")}
         ${this._toolBtn("eraser", "", "橡皮擦")}
         <span class="huabi-sep"></span>
         <button type="button" id="huabi-undo" title="撤销">${ic("undo")}</button>
@@ -802,12 +895,46 @@
 
     _styleProfileId(toolId) {
       if (S.isEraserTool(toolId)) return "eraser";
-      if (S.isShapeTool(toolId)) return this.engine.lastPenTool || "pen1";
+      if (S.isShapeTool(toolId) || S.isTextTool(toolId)) return this.engine.lastPenTool || "pen1";
       return toolId;
     }
 
-    _persistToolProfiles() {
+    _persistSettings() {
       this.settings.toolProfiles = this.engine.toolProfiles;
+      this.settings.lastPenTool = this.engine.lastPenTool || this.settings.lastPenTool || "pen1";
+      this.settings.tableRows = this.engine.tableRows;
+      this.settings.tableCols = this.engine.tableCols;
+      this.settings.coordTicks = this.engine.coordTicks;
+      this.settings.coordShowY = this.engine.coordShowY;
+      this.settings.textFontSize = this.engine.textFontSize;
+      S.saveSettings(this.settings);
+    }
+
+    _persistToolProfiles() {
+      this._persistSettings();
+    }
+
+    _applyToolbarPosition() {
+      const bar = this.toolbar;
+      if (!bar) return;
+      const pos = this.settings?.toolbarPosition;
+      if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
+        bar.style.left = pos.left + "px";
+        bar.style.top = pos.top + "px";
+        bar.style.transform = "none";
+      }
+    }
+
+    _saveToolbarPosition() {
+      const bar = this.toolbar;
+      if (!bar) return;
+      const left = parseFloat(bar.style.left);
+      const top = parseFloat(bar.style.top);
+      if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+      this.settings.toolbarPosition = {
+        left: Math.round(left),
+        top: Math.round(top),
+      };
       S.saveSettings(this.settings);
     }
 
@@ -845,71 +972,152 @@
       const profileId = this._styleProfileId(toolId);
       const profile = this.engine.getProfile(profileId);
 
-      if (S.isShapeTool(toolId) && !S.isEraserTool(toolId)) {
-        const hint = document.createElement("p");
-        hint.className = "huabi-popover-hint";
-        hint.textContent = `线宽跟随${this.engine.lastPenTool === "pen2" ? "画笔 2" : "画笔 1"}`;
-        body.appendChild(hint);
-      }
+      const simpleShape =
+        S.isShapeTool(toolId) &&
+        !S.isEraserTool(toolId) &&
+        toolId !== "table" &&
+        toolId !== "axes" &&
+        toolId !== "text";
 
-      if (!S.isEraserTool(toolId) && toolId !== "table") {
-        const widthRow = this._popoverRangeRow(
-          S.isHighlighterTool(toolId) ? "粗细" : "线宽",
-          1,
-          24,
-          profile.lineWidth || 3,
-          (v) => {
-            this.engine.setProfile(profileId, { lineWidth: v });
-            this._persistToolProfiles();
-          }
+      if (simpleShape) {
+        body.appendChild(
+          this._popoverHint(
+            `线宽跟随${this.engine.lastPenTool === "pen2" ? "画笔 2" : "画笔 1"}`,
+            true
+          )
         );
-        body.appendChild(widthRow);
       }
 
-      if (S.isHighlighterTool(toolId)) {
-        const alphaPct = Math.round((profile.highlightAlpha ?? 0.5) * 100);
-        const alphaRow = this._popoverRangeRow("透明度", 20, 80, alphaPct, (v) => {
-          this.engine.setProfile(profileId, { highlightAlpha: v / 100 });
-          this._persistToolProfiles();
-        });
-        body.appendChild(alphaRow);
+      if (!S.isEraserTool(toolId) && toolId !== "table" && toolId !== "axes" && toolId !== "text") {
+        const fields = this._popoverFields();
+        fields.appendChild(
+          this._popoverRangeRow(
+            S.isHighlighterTool(toolId) ? "粗细" : "线宽",
+            1,
+            24,
+            profile.lineWidth || 3,
+            (v) => {
+              this.engine.setProfile(profileId, { lineWidth: v });
+              this._persistToolProfiles();
+            }
+          )
+        );
+        if (S.isHighlighterTool(toolId)) {
+          const alphaPct = Math.round((profile.highlightAlpha ?? 0.5) * 100);
+          fields.appendChild(
+            this._popoverRangeRow("透明度", 20, 80, alphaPct, (v) => {
+              this.engine.setProfile(profileId, { highlightAlpha: v / 100 });
+              this._persistToolProfiles();
+            })
+          );
+        }
+        body.appendChild(fields);
       }
 
       if (S.isEraserTool(toolId)) {
-        const sizeRow = this._popoverRangeRow(
-          "大小",
-          4,
-          48,
-          profile.lineWidth || 16,
-          (v) => {
-            this.engine.setProfile("eraser", { lineWidth: v });
-            this._persistToolProfiles();
-            this._updateCanvasCursors("eraser");
-          }
+        const fields = this._popoverFields();
+        fields.appendChild(
+          this._popoverRangeRow(
+            "大小",
+            4,
+            48,
+            profile.lineWidth || 16,
+            (v) => {
+              this.engine.setProfile("eraser", { lineWidth: v });
+              this._persistToolProfiles();
+              this._updateCanvasCursors("eraser");
+            }
+          )
         );
-        body.appendChild(sizeRow);
+        body.appendChild(fields);
       }
 
       if (toolId === "table") {
-        const widthRow = this._popoverRangeRow("线宽", 1, 24, profile.lineWidth || 3, (v) => {
-          this.engine.setProfile(profileId, { lineWidth: v });
-          this._persistToolProfiles();
-        });
-        body.appendChild(widthRow);
-        body.appendChild(this._popoverNumberRow("行", this.engine.tableRows, (v) => {
-          this.engine.tableRows = v;
-          this.settings.tableRows = v;
-          this._persistToolProfiles();
-        }));
-        body.appendChild(this._popoverNumberRow("列", this.engine.tableCols, (v) => {
-          this.engine.tableCols = v;
-          this.settings.tableCols = v;
-          this._persistToolProfiles();
-        }));
-        const hint = document.createElement("p");
-        hint.className = "huabi-popover-hint";
-        hint.textContent = "拖拽绘制表格外框";
-        body.appendChild(hint);
+        const fields = this._popoverFields();
+        fields.appendChild(
+          this._popoverRangeRow("线宽", 1, 24, profile.lineWidth || 3, (v) => {
+            this.engine.setProfile(profileId, { lineWidth: v });
+            this._persistToolProfiles();
+          })
+        );
+        const grid = document.createElement("div");
+        grid.className = "huabi-popover-grid-2";
+        grid.appendChild(
+          this._popoverNumberRow("行数", this.engine.tableRows, (v) => {
+            this.engine.tableRows = v;
+            this.settings.tableRows = v;
+            this._persistToolProfiles();
+          })
+        );
+        grid.appendChild(
+          this._popoverNumberRow("列数", this.engine.tableCols, (v) => {
+            this.engine.tableCols = v;
+            this.settings.tableCols = v;
+            this._persistToolProfiles();
+          })
+        );
+        fields.appendChild(grid);
+        body.appendChild(fields);
+        body.appendChild(this._popoverHint("拖拽绘制表格外框"));
+      }
+
+      if (toolId === "axes") {
+        const fields = this._popoverFields();
+        fields.appendChild(
+          this._popoverRangeRow("线宽", 1, 24, profile.lineWidth || 3, (v) => {
+            this.engine.setProfile(profileId, { lineWidth: v });
+            this._persistToolProfiles();
+          })
+        );
+        fields.appendChild(
+          this._popoverNumberRow("刻度数", this.engine.coordTicks, (v) => {
+            this.engine.coordTicks = v;
+            this.settings.coordTicks = v;
+            this._persistToolProfiles();
+          })
+        );
+        fields.appendChild(
+          this._popoverCheckboxRow("显示 Y 轴", this.engine.coordShowY, (on) => {
+            this.engine.coordShowY = on;
+            this.settings.coordShowY = on;
+            this._persistToolProfiles();
+          })
+        );
+        body.appendChild(fields);
+        body.appendChild(
+          this._popoverHint("默认仅 X 轴；勾选 Y 轴后为完整坐标系。拖拽划定区域。")
+        );
+      }
+
+      if (toolId === "text") {
+        const fields = this._popoverFields();
+        const pagePx = S.getPageDefaultFontSize();
+        const stored = this.settings.textFontSize ?? 0;
+        body.appendChild(
+          this._popoverHint(
+            `颜色跟随${this.engine.lastPenTool === "pen2" ? "画笔 2" : "画笔 1"}；当前网页默认字号约 ${pagePx}px`,
+            true
+          )
+        );
+        fields.appendChild(
+          this._popoverNumberRow(
+            "字号",
+            stored,
+            (v) => {
+              const px = Math.max(0, Math.min(120, v));
+              this.settings.textFontSize = px;
+              this.engine.textFontSize = px;
+              this._persistToolProfiles();
+            },
+            { min: 0, max: 120 }
+          )
+        );
+        body.appendChild(fields);
+        body.appendChild(
+          this._popoverHint(
+            "点击页面输入文字；Enter 确认，Shift+Enter 换行。设为 0 时每次使用网页默认字号。"
+          )
+        );
       }
 
       this.toolPopover.hidden = false;
@@ -917,6 +1125,33 @@
         c.classList.toggle("huabi-caret-open", c.dataset.toolCaret === toolId);
       });
       this._positionToolPopover(anchor);
+    }
+
+    _popoverFields() {
+      const el = document.createElement("div");
+      el.className = "huabi-popover-fields";
+      return el;
+    }
+
+    _popoverHint(text, top = false) {
+      const p = document.createElement("p");
+      p.className = top ? "huabi-popover-hint huabi-popover-hint--top" : "huabi-popover-hint";
+      p.textContent = text;
+      return p;
+    }
+
+    _popoverCheckboxRow(label, checked, onChange) {
+      const row = document.createElement("label");
+      row.className = "huabi-popover-row huabi-popover-check";
+      const span = document.createElement("span");
+      span.textContent = label;
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!checked;
+      input.addEventListener("change", () => onChange(input.checked));
+      row.appendChild(span);
+      row.appendChild(input);
+      return row;
     }
 
     _popoverRangeRow(label, min, max, value, onChange) {
@@ -941,18 +1176,20 @@
       return row;
     }
 
-    _popoverNumberRow(label, value, onChange) {
+    _popoverNumberRow(label, value, onChange, opts = {}) {
+      const min = opts.min ?? 1;
+      const max = opts.max ?? 20;
       const row = document.createElement("label");
       row.className = "huabi-popover-row";
       const span = document.createElement("span");
       span.textContent = label;
       const input = document.createElement("input");
       input.type = "number";
-      input.min = "1";
-      input.max = "20";
+      input.min = String(min);
+      input.max = String(max);
       input.value = String(value);
       const sync = () => {
-        const v = Math.max(1, Math.min(20, Number(input.value) || 3));
+        const v = Math.max(min, Math.min(max, Number(input.value) || min));
         input.value = String(v);
         onChange(v);
       };
@@ -1036,7 +1273,7 @@
     _getBrushCursorColor() {
       const tool = this.engine.tool;
       let t = tool;
-      if (S.isShapeTool(tool)) t = this.engine.lastPenTool || "pen1";
+      if (S.isShapeTool(tool) || S.isTextTool(tool)) t = this.engine.lastPenTool || "pen1";
       if (S.isEraserTool(tool)) return "#252423";
       return this.engine.getProfile(t).color || "#252423";
     }
@@ -1073,10 +1310,14 @@
           const er = this.engine.getProfile("eraser");
           cursor = C.eraser(Math.max(er.lineWidth || 16, 8));
         } else if (this.brushMode) {
-          const color = this._getBrushCursorColor();
-          if (S.isPenTool(id)) cursor = C.pen(color);
-          else if (S.isHighlighterTool(id)) cursor = C.highlighter(color);
-          else cursor = C.brush(color);
+          if (S.isTextTool(id)) {
+            cursor = "text";
+          } else {
+            const color = this._getBrushCursorColor();
+            if (S.isPenTool(id)) cursor = C.pen(color);
+            else if (S.isHighlighterTool(id)) cursor = C.highlighter(color);
+            else cursor = C.brush(color);
+          }
         }
       }
 
@@ -1092,6 +1333,7 @@
     }
 
     selectTool(toolId) {
+      if (toolId !== "text") this._closeTextEditor(false);
       if (this._popoverTool && this._popoverTool !== toolId) {
         this._closeToolPopover();
       }
@@ -1099,6 +1341,7 @@
       if (S.isPenTool(toolId)) {
         this.engine.lastPenTool = toolId;
         this.settings.lastPenTool = toolId;
+        this._persistSettings();
       }
       const drawTools = [
         "pen1",
@@ -1108,6 +1351,8 @@
         "line",
         "rect",
         "table",
+        "axes",
+        "text",
         "eraser",
       ];
       if (drawTools.includes(toolId) && !this.brushMode) {
@@ -1145,6 +1390,64 @@
       this.syncToolbarFromTool();
     }
 
+    _closeTextEditor(commit) {
+      if (!this._textEditor) return;
+      const { el, x, y } = this._textEditor;
+      const text = el.value;
+      el.parentElement?.remove();
+      this._textEditor = null;
+      this.root?.classList.remove("huabi-text-editing");
+      if (commit && text.trim()) {
+        this._commitTextToCanvas(text, x, y);
+      }
+    }
+
+    async _commitTextToCanvas(text, x, y) {
+      await S.ensureTextFont();
+      const fontSize = S.resolveTextFontSize(this.settings, this.engine);
+      const color = this.engine.getProfile(this.engine.lastPenTool || "pen1").color;
+      this.engine.pushHistory();
+      this.engine.drawText(text, x, y, fontSize, color);
+    }
+
+    _openTextEditor(x, y) {
+      this._closeTextEditor(false);
+      this._closeToolPopover();
+      const fontSize = S.resolveTextFontSize(this.settings, this.engine);
+      const color = this.engine.getProfile(this.engine.lastPenTool || "pen1").color;
+      const wrap = document.createElement("div");
+      wrap.className = "huabi-text-editor-wrap";
+      const ta = document.createElement("textarea");
+      ta.className = "huabi-text-editor";
+      ta.rows = 1;
+      ta.placeholder = "输入文字…";
+      ta.style.fontFamily = S.TEXT_FONT_CSS;
+      ta.style.fontSize = `${fontSize}px`;
+      ta.style.color = color;
+      wrap.style.left = `${Math.max(8, Math.min(x, window.innerWidth - 160))}px`;
+      wrap.style.top = `${Math.max(8, Math.min(y, window.innerHeight - 48))}px`;
+      wrap.appendChild(ta);
+      this.root.appendChild(wrap);
+      this._textEditor = { el: ta, x, y };
+      this.root.classList.add("huabi-text-editing");
+      const commit = () => this._closeTextEditor(true);
+      ta.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this._closeTextEditor(false);
+        } else if (ev.key === "Enter" && !ev.shiftKey) {
+          ev.preventDefault();
+          commit();
+        }
+      });
+      ta.addEventListener("blur", () => commit(), { once: true });
+      requestAnimationFrame(() => {
+        ta.focus();
+        S.ensureTextFont();
+      });
+    }
+
     _canCanvasInteract() {
       if (!this.active) return false;
       if (this.brushMode) return true;
@@ -1155,7 +1458,7 @@
     _bindCanvasEvents(wrap) {
       const skipTarget = (el) =>
         el.closest(
-          "#huabi-toolbar, #huabi-tool-popover, #huabi-settings-backdrop, #huabi-settings-panel"
+          "#huabi-toolbar, #huabi-tool-popover, #huabi-settings-backdrop, #huabi-settings-panel, .huabi-text-editor-wrap"
         );
 
       const stopTrack = () => {
@@ -1168,10 +1471,18 @@
 
       const bindDown = (e) => {
         if (!this._canCanvasInteract()) return;
+        if (this._textEditor) return;
         if (this.settingsPanel?.visible) return;
         if (skipTarget(e.target)) return;
         if (e.button !== 0) return;
         const toolId = this._resolveActiveToolId();
+        if (toolId === "text") {
+          const { x, y } = this.engine.getPos(e);
+          this._openTextEditor(x, y);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         const isEraser = toolId === "eraser";
         this._canvasPointerActive = true;
         this.root.classList.add("huabi-drawing");
@@ -1252,6 +1563,7 @@
       };
 
       const onUp = () => {
+        if (dragging) this._saveToolbarPosition();
         dragging = false;
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
@@ -1333,12 +1645,10 @@
     _isEditableTarget() {
       const el = document.activeElement;
       if (!el || el === document.body || el === document.documentElement) return false;
+      if (el.closest?.(".huabi-text-editor-wrap")) return true;
       if (this.root?.contains(el)) {
-        const panel = document.getElementById("huabi-settings-panel");
-        if (panel?.contains(el)) {
-          const tag = el.tagName;
-          return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-        }
+        const tag = el.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
         return false;
       }
       const tag = el.tagName;
@@ -1349,6 +1659,7 @@
 
     _onKeyDown(e) {
       if (!this.active) return;
+      if (this._textEditor) return;
       if (this.settingsPanel?.visible) return;
       if (this._isEditableTarget()) return;
       const shortcuts = this.settings.shortcuts || S.DEFAULT_SHORTCUTS;
@@ -1377,6 +1688,8 @@
         "line",
         "rect",
         "table",
+        "axes",
+        "text",
         "eraser",
       ];
       for (const id of toolIds) {
@@ -1442,6 +1755,9 @@
         this.applyBrushModeUI();
         this.engine.tableRows = this.settings.tableRows ?? 3;
         this.engine.tableCols = this.settings.tableCols ?? 3;
+        this.engine.coordTicks = this.settings.coordTicks ?? 5;
+        this.engine.coordShowY = this.settings.coordShowY === true;
+        this.engine.textFontSize = this.settings.textFontSize ?? 0;
         this.engine.resize();
         this.syncToolbarFromTool();
         this._updatePenButtonColors();
@@ -1449,6 +1765,7 @@
         this.setBrushMode(false);
         this.settingsPanel.hide();
         this._closeToolPopover();
+        this._closeTextEditor(false);
         this.canvasWrap.classList.remove("huabi-notes-hidden");
         this.notesHidden = false;
       }
@@ -1506,10 +1823,17 @@
           this.engine.lastPenTool = s.lastPenTool || "pen1";
           this.engine.tableRows = s.tableRows ?? 3;
           this.engine.tableCols = s.tableCols ?? 3;
+          this.engine.coordTicks = s.coordTicks ?? 5;
+          this.engine.coordShowY = s.coordShowY === true;
           this.settings.tableRows = s.tableRows ?? 3;
           this.settings.tableCols = s.tableCols ?? 3;
+          this.settings.coordTicks = s.coordTicks ?? 5;
+          this.settings.coordShowY = s.coordShowY === true;
+          this.engine.textFontSize = s.textFontSize ?? 0;
+          this.settings.textFontSize = s.textFontSize ?? 0;
           this.syncToolbarFromTool();
           this._updatePenButtonColors();
+          this._applyToolbarPosition();
           sendResponse({ ok: true });
         });
         return true;

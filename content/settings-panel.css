@@ -127,9 +127,21 @@
 
 .huabi-shortcut-table th,
 .huabi-shortcut-table td {
-  padding: 6px 8px;
+  padding: 8px 10px;
   text-align: left;
+  vertical-align: middle;
   border-bottom: 1px solid #edebe9;
+}
+
+.huabi-shortcut-table th {
+  font-weight: 600;
+  font-size: 11px;
+  color: #605e5c;
+  background: #faf9f8;
+}
+
+.huabi-shortcut-table .huabi-sc-actions {
+  white-space: nowrap;
 }
 
 .huabi-shortcut-table tr.recording {

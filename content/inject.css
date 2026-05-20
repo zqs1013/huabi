@@ -84,3 +84,32 @@
 #huabi-root.huabi-settings-open .huabi-canvas-wrap {
   pointer-events: none !important;
 }
+
+.huabi-text-editor-wrap {
+  position: fixed;
+  z-index: 2147483647;
+  pointer-events: auto;
+  min-width: 120px;
+  max-width: min(480px, calc(100vw - 24px));
+}
+
+.huabi-text-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 120px;
+  min-height: 1.4em;
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px dashed #0078d4;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  outline: none;
+  resize: both;
+  line-height: 1.25;
+  overflow: hidden;
+}
+
+#huabi-root.huabi-text-editing .huabi-canvas-wrap {
+  pointer-events: none !important;
+}

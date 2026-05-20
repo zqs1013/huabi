@@ -46,18 +46,25 @@
     line: "直线",
     rect: "矩形",
     table: "表格",
+    axes: "坐标系",
+    text: "文字",
     eraser: "橡皮擦",
   };
 
+  const TEXT_FONT_FAMILY = "HuabiHandwriting";
+  const TEXT_FONT_CSS = `"${TEXT_FONT_FAMILY}", "清松手写体1", "JasonHandwriting1", cursive`;
+
   const DEFAULT_SHORTCUTS = {
     toggleDrawMode: "Space",
-    pen1: "KeyP",
-    pen2: "Shift+KeyP",
-    highlighter1: "KeyH",
-    highlighter2: "Shift+KeyH",
+    pen1: "Digit1",
+    pen2: "Digit2",
+    highlighter1: "Digit3",
+    highlighter2: "Digit4",
     line: "KeyL",
     rect: "KeyR",
     table: "KeyT",
+    axes: "KeyG",
+    text: "KeyI",
     eraser: "KeyE",
     toggleVisibility: "KeyV",
     undo: "Control+KeyZ",
@@ -74,6 +81,8 @@
     "line",
     "rect",
     "table",
+    "axes",
+    "text",
     "eraser",
   ];
 
@@ -86,6 +95,8 @@
     { id: "line", label: "直线" },
     { id: "rect", label: "矩形" },
     { id: "table", label: "表格" },
+    { id: "axes", label: "坐标系" },
+    { id: "text", label: "文字" },
     { id: "eraser", label: "橡皮擦" },
     { id: "toggleVisibility", label: "隐藏/显示笔记" },
     { id: "undo", label: "撤销" },
@@ -142,54 +153,130 @@
     return { ...base, ...(patch || {}) };
   }
 
+  const LEGACY_TOOL_SHORTCUTS = {
+    pen1: "KeyP",
+    pen2: "Shift+KeyP",
+    highlighter1: "KeyH",
+    highlighter2: "Shift+KeyH",
+  };
+
+  function migrateToolShortcuts(shortcuts) {
+    if (!shortcuts) return;
+    for (const [id, legacy] of Object.entries(LEGACY_TOOL_SHORTCUTS)) {
+      if (shortcuts[id] === legacy) shortcuts[id] = DEFAULT_SHORTCUTS[id];
+    }
+  }
+
   function getDefaultSettings() {
     return {
       toolProfiles: deepClone(DEFAULT_TOOL_PROFILES),
       lastPenTool: "pen1",
       tableRows: 3,
       tableCols: 3,
+      coordTicks: 5,
+      coordShowY: false,
+      textFontSize: 0,
+      toolbarPosition: null,
       shortcuts: deepClone(DEFAULT_SHORTCUTS),
     };
   }
 
+  function normalizeLoadedSettings(raw) {
+    const settings = {
+      ...getDefaultSettings(),
+      ...raw,
+      toolProfiles: normalizeToolProfiles(raw?.toolProfiles),
+      shortcuts: (() => {
+        const sc = mergeShortcuts(DEFAULT_SHORTCUTS, raw?.shortcuts);
+        migrateToolShortcuts(sc);
+        return window.HuabiShortcuts.sanitizeShortcuts(sc, DEFAULT_SHORTCUTS);
+      })(),
+      tableRows: raw?.tableRows ?? 3,
+      tableCols: raw?.tableCols ?? 3,
+      coordTicks: raw?.coordTicks ?? 5,
+      coordShowY: raw?.coordShowY === true,
+      textFontSize: raw?.textFontSize ?? 0,
+    };
+    const pos = raw?.toolbarPosition;
+    if (
+      pos &&
+      Number.isFinite(pos.left) &&
+      Number.isFinite(pos.top)
+    ) {
+      settings.toolbarPosition = {
+        left: Math.round(pos.left),
+        top: Math.round(pos.top),
+      };
+    } else {
+      settings.toolbarPosition = null;
+    }
+    return settings;
+  }
+
+  async function writeSettingsToStorage(settings) {
+    const payload = { [SETTINGS_KEY]: settings };
+    await chrome.storage.local.set(payload);
+    try {
+      await chrome.storage.sync.set(payload);
+    } catch {
+      /* 未登录或超出 sync 配额时仍保留 local */
+    }
+  }
+
   async function loadSettings() {
-    const data = await chrome.storage.sync.get([SETTINGS_KEY, LEGACY_KEY]);
-    let settings = data[SETTINGS_KEY];
+    const [syncData, localData] = await Promise.all([
+      chrome.storage.sync.get([SETTINGS_KEY, LEGACY_KEY]),
+      chrome.storage.local.get([SETTINGS_KEY]),
+    ]);
+    let settings = syncData[SETTINGS_KEY] || localData[SETTINGS_KEY];
 
     if (!settings) {
       settings = getDefaultSettings();
-      if (data[LEGACY_KEY]) {
-        const leg = data[LEGACY_KEY];
+      if (syncData[LEGACY_KEY]) {
+        const leg = syncData[LEGACY_KEY];
         if (leg.color) settings.toolProfiles.pen1.color = leg.color;
         if (leg.lineWidth) settings.toolProfiles.pen1.lineWidth = leg.lineWidth;
         await chrome.storage.sync.remove(LEGACY_KEY);
       }
-      settings.toolProfiles = normalizeToolProfiles(settings.toolProfiles);
-      await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
+      settings = normalizeLoadedSettings(settings);
+      await writeSettingsToStorage(settings);
       return settings;
     }
 
-    settings = {
-      ...getDefaultSettings(),
-      ...settings,
-      toolProfiles: normalizeToolProfiles(settings.toolProfiles),
-      shortcuts: window.HuabiShortcuts.sanitizeShortcuts(
-        mergeShortcuts(DEFAULT_SHORTCUTS, settings.shortcuts),
-        DEFAULT_SHORTCUTS
-      ),
-      tableRows: settings.tableRows ?? 3,
-      tableCols: settings.tableCols ?? 3,
-    };
+    settings = normalizeLoadedSettings(settings);
+    if (!syncData[SETTINGS_KEY] && localData[SETTINGS_KEY]) {
+      try {
+        await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
+      } catch {
+        /* ignore */
+      }
+    }
     return settings;
   }
 
+  function getPageDefaultFontSize() {
+    const fs = getComputedStyle(document.documentElement).fontSize;
+    const n = parseFloat(fs);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 16;
+  }
+
+  function resolveTextFontSize(settings, engine) {
+    const raw = settings?.textFontSize ?? engine?.textFontSize ?? 0;
+    if (!raw || raw <= 0) return getPageDefaultFontSize();
+    return Math.max(8, Math.min(120, Math.round(raw)));
+  }
+
+  let _textFontReady = null;
+  function ensureTextFont() {
+    if (_textFontReady) return _textFontReady;
+    _textFontReady = document.fonts.load(`16px ${TEXT_FONT_CSS}`).catch(() => {});
+    return _textFontReady;
+  }
+
   async function saveSettings(settings) {
-    settings.toolProfiles = normalizeToolProfiles(settings.toolProfiles);
-    settings.shortcuts = window.HuabiShortcuts.sanitizeShortcuts(
-      settings.shortcuts,
-      DEFAULT_SHORTCUTS
-    );
-    await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
+    const normalized = normalizeLoadedSettings(settings);
+    await writeSettingsToStorage(normalized);
+    return normalized;
   }
 
   function isPenTool(id) {
@@ -201,7 +288,7 @@
   }
 
   function isShapeTool(id) {
-    return id === "line" || id === "rect" || id === "table";
+    return id === "line" || id === "rect" || id === "table" || id === "axes";
   }
 
   function isFreehandTool(id) {
@@ -212,8 +299,12 @@
     return id === "eraser";
   }
 
+  function isTextTool(id) {
+    return id === "text";
+  }
+
   function profileTargetTool(engine, tool) {
-    if (isShapeTool(tool)) return engine.lastPenTool;
+    if (isShapeTool(tool) || isTextTool(tool)) return engine.lastPenTool;
     if (tool === "eraser") return "eraser";
     return tool;
   }
@@ -250,6 +341,12 @@
     isShapeTool,
     isFreehandTool,
     isEraserTool,
+    isTextTool,
     profileTargetTool,
+    TEXT_FONT_FAMILY,
+    TEXT_FONT_CSS,
+    getPageDefaultFontSize,
+    resolveTextFontSize,
+    ensureTextFont,
   };
 })();

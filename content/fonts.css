@@ -1,0 +1,11 @@
+@font-face {
+  font-family: "HuabiHandwriting";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("清松手写体1"),
+    local("清松手寫體1"),
+    local("JasonHandwriting1"),
+    url("fonts/QingSongShouXieTi1.ttf") format("truetype");
+}

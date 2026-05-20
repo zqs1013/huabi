@@ -36,7 +36,7 @@
     const colorHint = el(
       "p",
       "huabi-form-hint",
-      "线宽、荧光笔透明度、橡皮大小、表格行列请在工具栏各工具右下角 ▾ 中调整。"
+      "设置会自动保存到浏览器，换网页、重启后仍有效（需登录 Chrome 账号可同步到其他设备）。线宽、荧光笔透明度等请在工具栏各工具右下角 ▾ 中调整。"
     );
     toolsSec.appendChild(colorHint);
 
@@ -61,8 +61,9 @@
     container.appendChild(scSec);
 
     const actions = el("div", "huabi-form-actions");
-    const btnSave = el("button", "huabi-btn primary", "保存");
+    const btnSave = el("button", "huabi-btn primary", "立即保存");
     btnSave.type = "button";
+    let autoSaveTimer = null;
     const btnResetSc = el("button", "huabi-btn", "恢复默认快捷键");
     btnResetSc.type = "button";
     const btnResetCol = el("button", "huabi-btn", "恢复默认颜色");
@@ -95,6 +96,7 @@
         tr.querySelector("[data-clear]").addEventListener("click", () => {
           state.settings.shortcuts[action.id] = "";
           tr.querySelector(".kbd").textContent = K.formatShortcutDisplay("");
+          scheduleAutoSave();
         });
         scBody.appendChild(tr);
       });
@@ -116,6 +118,7 @@
         inp.dataset.tool = toolId;
         inp.dataset.slot = String(i);
         inp.dataset.field = "saved-color";
+        inp.addEventListener("input", scheduleAutoSave);
         colorsRow.appendChild(inp);
       });
       block.appendChild(colorsRow);
@@ -125,6 +128,7 @@
       customInp.value = profile.color || saved[0];
       customInp.dataset.tool = toolId;
       customInp.dataset.field = "custom-color";
+      customInp.addEventListener("input", scheduleAutoSave);
       block.appendChild(labelRow("当前颜色", customInp));
       return block;
     }
@@ -135,6 +139,27 @@
       row.appendChild(span);
       row.appendChild(input);
       return row;
+    }
+
+    async function persistSettings() {
+      collect();
+      const saved = await S.saveSettings(state.settings);
+      state.settings = saved;
+      status.textContent = "已保存";
+      status.classList.remove("error");
+      status.hidden = false;
+      if (options.onSave) await options.onSave(state.settings);
+    }
+
+    function scheduleAutoSave() {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(() => {
+        persistSettings().catch(() => {
+          status.textContent = "保存失败，请重试";
+          status.classList.add("error");
+          status.hidden = false;
+        });
+      }, 400);
     }
 
     function collect() {
@@ -189,17 +214,18 @@
       recordHint.hidden = true;
       status.hidden = true;
       renderShortcuts();
+      scheduleAutoSave();
     }
 
     document.addEventListener("keydown", onKeyRecord, true);
 
-    btnSave.addEventListener("click", async () => {
-      collect();
-      await S.saveSettings(state.settings);
-      status.textContent = "已保存";
-      status.classList.remove("error");
-      status.hidden = false;
-      if (options.onSave) await options.onSave(state.settings);
+    btnSave.addEventListener("click", () => {
+      clearTimeout(autoSaveTimer);
+      persistSettings().catch(() => {
+        status.textContent = "保存失败，请重试";
+        status.classList.add("error");
+        status.hidden = false;
+      });
     });
 
     btnResetSc.addEventListener("click", () => {
@@ -229,7 +255,12 @@
 
     const api = {
       collect,
+      async flushSave() {
+        clearTimeout(autoSaveTimer);
+        await persistSettings();
+      },
       destroy() {
+        clearTimeout(autoSaveTimer);
         document.removeEventListener("keydown", onKeyRecord, true);
       },
       refresh(newSettings) {
