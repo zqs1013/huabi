@@ -6,11 +6,16 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 
+/** 实心圆点类图标，保留 fill="currentColor"（勿转成 fill="none"） */
+const FILLED_ICONS = new Set(["drag"]);
+
 const MAP = {
   modePointer: "MoveOne",
   pen: "Pencil",
   highlighter: "HighLight",
   line: "Minus",
+  arrowLine: "ArrowRight",
+  circle: "Round",
   rect: "Rectangle",
   table: "Table",
   axes: "ChartLine",
@@ -42,7 +47,7 @@ function fetchText(url) {
   });
 }
 
-function extractSvg(js) {
+function extractSvg(js, key) {
   const m = js.match(/function \(props\) \{\s*return ([\s\S]+?);\s*\}\);/);
   if (!m) return null;
   const props = {
@@ -55,18 +60,21 @@ function extractSvg(js) {
   };
   let svg = eval(m[1]);
   if (typeof svg !== "string") return null;
-  svg = svg
-    .replace(/stroke-width="[^"]*"/g, 'stroke-width="2"')
-    .replace(/fill="none" stroke="currentColor"/g, 'fill="none" stroke="currentColor"')
-    .replace(/fill="currentColor"/g, 'fill="none"');
+  svg = svg.replace(/stroke-width="[^"]*"/g, 'stroke-width="2"');
+  if (!FILLED_ICONS.has(key)) {
+    svg = svg.replace(/fill="currentColor"/g, 'fill="none"');
+  }
   return svg;
 }
 
-function normalizeLocalSvg(svg) {
-  return svg
+function normalizeLocalSvg(svg, key) {
+  let out = svg
     .replace(/\s(width|height)="[^"]*"/gi, "")
-    .replace(/stroke="(?!currentColor)[^"]*"/gi, 'stroke="currentColor"')
-    .replace(/fill="(#[0-9a-fA-F]{3,8}|black)"/gi, 'fill="none"');
+    .replace(/stroke="(?!currentColor)[^"]*"/gi, 'stroke="currentColor"');
+  if (FILLED_ICONS.has(key)) {
+    return out.replace(/fill="(#[0-9a-fA-F]{3,8}|black)"/gi, 'fill="currentColor"');
+  }
+  return out.replace(/fill="(#[0-9a-fA-F]{3,8}|black)"/gi, 'fill="none"');
 }
 
 async function main() {
@@ -78,14 +86,14 @@ async function main() {
     if (fs.existsSync(localPath)) {
       const local = fs.readFileSync(localPath, "utf8");
       if (local.includes("<svg") && !local.includes("props.size")) {
-        out[key] = normalizeLocalSvg(local);
+        out[key] = normalizeLocalSvg(local, key);
         console.log("ok", key, "(local)");
         continue;
       }
     }
     const url = `https://unpkg.com/@icon-park/svg@1.4.2/es/icons/${name}.js`;
     const js = await fetchText(url);
-    const svg = extractSvg(js);
+    const svg = extractSvg(js, key);
     if (!svg || !svg.includes("<svg")) {
       console.error("fail", key, name);
       process.exit(1);

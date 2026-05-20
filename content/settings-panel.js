@@ -63,8 +63,11 @@
           this.overlay.engine.coordTicks = s.coordTicks ?? 5;
           this.overlay.engine.coordShowY = s.coordShowY === true;
           this.overlay.engine.textFontSize = s.textFontSize ?? 0;
+          this.overlay.engine.arrowEnds =
+            s.arrowEnds === "both" ? "both" : "end";
           this.overlay.syncToolbarFromTool();
           this.overlay._updatePenButtonColors();
+          this.overlay._rebuildToolbarTools();
         },
       });
       this.visible = true;

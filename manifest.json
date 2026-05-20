@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Huabi 网页画笔",
-  "version": "1.7.2",
+  "version": "1.8.3",
   "description": "在网页上自由标注：画笔、直线、矩形、表格、荧光笔、文字等",
   "permissions": ["storage", "activeTab"],
   "action": {
-    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

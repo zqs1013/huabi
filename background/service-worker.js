@@ -30,6 +30,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
+chrome.action.onClicked.addListener(async (tab) => {
+  if (tab?.id) await toggleDrawOnTab(tab.id);
+});
+
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "toggle-draw") return;
   const tab = await getActiveTab();

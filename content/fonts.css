@@ -4,8 +4,7 @@
   font-weight: 400;
   font-display: swap;
   src:
-    local("清松手写体1"),
-    local("清松手寫體1"),
-    local("JasonHandwriting1"),
-    url("fonts/QingSongShouXieTi1.ttf") format("truetype");
+    local("寒蝉手拙体"),
+    local("HCSZT"),
+    url("fonts/寒蝉手拙体.ttf") format("truetype");
 }

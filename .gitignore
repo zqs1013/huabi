@@ -1,3 +1,5 @@
 .DS_Store
 Thumbs.db
 *.log
+dist/
+content/fonts/JasonHandwriting1.ttf

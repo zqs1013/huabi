@@ -45,14 +45,55 @@
     highlighter2: "荧光笔 2",
     line: "直线",
     rect: "矩形",
+    arrowLine: "箭头直线",
+    circle: "圆形",
     table: "表格",
     axes: "坐标系",
     text: "文字",
     eraser: "橡皮擦",
   };
 
+  /** 可在设置中勾选是否在工具栏显示的形状类工具 */
+  const TOOLBAR_SHAPE_TOOLS = [
+    { id: "line", label: "直线", defaultVisible: true },
+    { id: "rect", label: "矩形", defaultVisible: true },
+    { id: "arrowLine", label: "箭头直线", defaultVisible: false },
+    { id: "circle", label: "圆形", defaultVisible: false },
+    { id: "table", label: "表格", defaultVisible: true },
+    { id: "axes", label: "坐标系", defaultVisible: true },
+    { id: "text", label: "文字", defaultVisible: true },
+  ];
+
+  function getDefaultToolbarVisible() {
+    const out = {};
+    for (const t of TOOLBAR_SHAPE_TOOLS) {
+      out[t.id] = t.defaultVisible;
+    }
+    return out;
+  }
+
   const TEXT_FONT_FAMILY = "HuabiHandwriting";
-  const TEXT_FONT_CSS = `"${TEXT_FONT_FAMILY}", "清松手写体1", "JasonHandwriting1", cursive`;
+  const TEXT_FONT_CSS = `"${TEXT_FONT_FAMILY}", "寒蝉手拙体", "HCSZT", cursive`;
+  const TEXT_FONT_FILE = "content/fonts/寒蝉手拙体.ttf";
+
+  function getTextFontCss() {
+    return TEXT_FONT_CSS;
+  }
+
+  function injectTextFontFace() {
+    if (injectTextFontFace._done) return;
+    const id = "huabi-text-font-face";
+    if (document.getElementById(id)) {
+      injectTextFontFace._done = true;
+      return;
+    }
+    const url = chrome.runtime.getURL(TEXT_FONT_FILE);
+    const style = document.createElement("style");
+    style.id = id;
+    style.textContent = `@font-face{font-family:"${TEXT_FONT_FAMILY}";font-style:normal;font-weight:400;font-display:swap;src:url("${url}") format("truetype");}`;
+    (document.head || document.documentElement).appendChild(style);
+    injectTextFontFace._done = true;
+  }
 
   const DEFAULT_SHORTCUTS = {
     toggleDrawMode: "Space",
@@ -66,6 +107,8 @@
     axes: "KeyG",
     text: "KeyI",
     eraser: "KeyE",
+    arrowLine: "",
+    circle: "",
     toggleVisibility: "KeyV",
     undo: "Control+KeyZ",
     redo: "Control+Shift+KeyZ",
@@ -80,6 +123,8 @@
     "highlighter2",
     "line",
     "rect",
+    "arrowLine",
+    "circle",
     "table",
     "axes",
     "text",
@@ -94,6 +139,8 @@
     { id: "highlighter2", label: "荧光笔 2" },
     { id: "line", label: "直线" },
     { id: "rect", label: "矩形" },
+    { id: "arrowLine", label: "箭头直线" },
+    { id: "circle", label: "圆形" },
     { id: "table", label: "表格" },
     { id: "axes", label: "坐标系" },
     { id: "text", label: "文字" },
@@ -177,8 +224,21 @@
       coordShowY: false,
       textFontSize: 0,
       toolbarPosition: null,
+      toolbarVisible: getDefaultToolbarVisible(),
+      arrowEnds: "end",
       shortcuts: deepClone(DEFAULT_SHORTCUTS),
     };
+  }
+
+  function normalizeToolbarVisible(raw) {
+    const def = getDefaultToolbarVisible();
+    const out = { ...def };
+    if (raw && typeof raw === "object") {
+      for (const t of TOOLBAR_SHAPE_TOOLS) {
+        if (typeof raw[t.id] === "boolean") out[t.id] = raw[t.id];
+      }
+    }
+    return out;
   }
 
   function normalizeLoadedSettings(raw) {
@@ -210,7 +270,31 @@
     } else {
       settings.toolbarPosition = null;
     }
+    settings.toolbarVisible = normalizeToolbarVisible(raw?.toolbarVisible);
+    settings.arrowEnds = raw?.arrowEnds === "both" ? "both" : "end";
     return settings;
+  }
+
+  function isToolbarToolVisible(settings, toolId) {
+    if (!TOOLBAR_SHAPE_TOOLS.some((t) => t.id === toolId)) return true;
+    const vis = settings?.toolbarVisible;
+    if (!vis) return true;
+    return vis[toolId] !== false;
+  }
+
+  function getAllToolIds() {
+    return [
+      "pen1",
+      "pen2",
+      "highlighter1",
+      "highlighter2",
+      ...TOOLBAR_SHAPE_TOOLS.map((t) => t.id),
+      "eraser",
+    ];
+  }
+
+  function getVisibleToolbarShapeTools(settings) {
+    return TOOLBAR_SHAPE_TOOLS.filter((t) => isToolbarToolVisible(settings, t.id));
   }
 
   async function writeSettingsToStorage(settings) {
@@ -260,16 +344,24 @@
     return Number.isFinite(n) && n > 0 ? Math.round(n) : 16;
   }
 
+  function getDefaultTextFontSize() {
+    return Math.max(8, Math.min(120, getPageDefaultFontSize() + 8));
+  }
+
   function resolveTextFontSize(settings, engine) {
     const raw = settings?.textFontSize ?? engine?.textFontSize ?? 0;
-    if (!raw || raw <= 0) return getPageDefaultFontSize();
+    if (!raw || raw <= 0) return getDefaultTextFontSize();
     return Math.max(8, Math.min(120, Math.round(raw)));
   }
 
   let _textFontReady = null;
   function ensureTextFont() {
+    injectTextFontFace();
     if (_textFontReady) return _textFontReady;
-    _textFontReady = document.fonts.load(`16px ${TEXT_FONT_CSS}`).catch(() => {});
+    _textFontReady = document.fonts
+      .load(`48px ${TEXT_FONT_FAMILY}`)
+      .then(() => document.fonts.ready)
+      .catch(() => {});
     return _textFontReady;
   }
 
@@ -288,7 +380,14 @@
   }
 
   function isShapeTool(id) {
-    return id === "line" || id === "rect" || id === "table" || id === "axes";
+    return (
+      id === "line" ||
+      id === "rect" ||
+      id === "arrowLine" ||
+      id === "circle" ||
+      id === "table" ||
+      id === "axes"
+    );
   }
 
   function isFreehandTool(id) {
@@ -330,7 +429,12 @@
     COLOR_TOOL_LABELS,
     TOOL_STYLE_LABELS,
     TOOL_IDS,
+    TOOLBAR_SHAPE_TOOLS,
     SHORTCUT_ACTIONS,
+    getDefaultToolbarVisible,
+    getAllToolIds,
+    getVisibleToolbarShapeTools,
+    isToolbarToolVisible,
     loadSettings,
     saveSettings,
     getDefaultSettings,
@@ -343,10 +447,20 @@
     isEraserTool,
     isTextTool,
     profileTargetTool,
+    getTextFontCss,
+    injectTextFontFace,
     TEXT_FONT_FAMILY,
-    TEXT_FONT_CSS,
     getPageDefaultFontSize,
+    getDefaultTextFontSize,
     resolveTextFontSize,
     ensureTextFont,
   };
+
+  try {
+    if (typeof document !== "undefined" && chrome?.runtime?.getURL) {
+      injectTextFontFace();
+    }
+  } catch {
+    /* ignore */
+  }
 })();

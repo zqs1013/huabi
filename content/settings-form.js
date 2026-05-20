@@ -45,6 +45,36 @@
     });
     container.appendChild(toolsSec);
 
+    const tbSec = el("section", "huabi-form-section");
+    tbSec.appendChild(el("h3", "", "工具栏显示"));
+    tbSec.appendChild(
+      el(
+        "p",
+        "huabi-form-hint",
+        "取消勾选后工具栏不显示该按钮；若已设置快捷键，仍可用快捷键切换工具。"
+      )
+    );
+    if (!state.settings.toolbarVisible) {
+      state.settings.toolbarVisible = S.getDefaultToolbarVisible();
+    }
+    const tbList = el("div", "huabi-toolbar-visible-list");
+    S.TOOLBAR_SHAPE_TOOLS.forEach((t) => {
+      const label = el("label", "huabi-toolbar-visible-item");
+      const inp = document.createElement("input");
+      inp.type = "checkbox";
+      inp.checked = state.settings.toolbarVisible[t.id] !== false;
+      inp.dataset.toolId = t.id;
+      inp.addEventListener("change", () => {
+        state.settings.toolbarVisible[t.id] = inp.checked;
+        scheduleAutoSave();
+      });
+      label.appendChild(inp);
+      label.appendChild(document.createTextNode(t.label));
+      tbList.appendChild(label);
+    });
+    tbSec.appendChild(tbList);
+    container.appendChild(tbSec);
+
     const scSec = el("section", "huabi-form-section");
     scSec.appendChild(el("h3", "", "快捷键"));
     const scHint = el(

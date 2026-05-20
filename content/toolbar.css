@@ -34,7 +34,7 @@
   width: 24px;
   height: 32px;
   cursor: grab;
-  color: #a19f9d;
+  color: #605e5c;
   border-radius: 6px;
 }
 
@@ -107,27 +107,15 @@
 
 #huabi-toolbar .huabi-color-btn {
   position: relative;
-  flex-direction: column;
-  gap: 2px;
   min-width: 34px;
-  padding: 2px 6px 3px;
+  padding: 2px 6px;
   box-sizing: border-box;
-}
-
-#huabi-toolbar .huabi-color-btn::after {
-  content: "";
-  display: block;
-  width: 18px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--tool-color, #252423);
-  flex-shrink: 0;
 }
 
 #huabi-toolbar .huabi-color-btn .huabi-icon {
   width: 18px;
   height: 18px;
-  color: var(--tool-color, #323130);
+  color: #000;
 }
 
 #huabi-toolbar .huabi-color-btn .huabi-icon svg {
@@ -140,7 +128,7 @@
 }
 
 #huabi-toolbar .huabi-color-btn.huabi-active-tool .huabi-icon {
-  color: var(--tool-color, #323130);
+  color: #000;
 }
 
 .huabi-tool-wrap {
@@ -280,6 +268,16 @@
   color: #323130;
   font-size: 12px;
   text-align: center;
+}
+
+.huabi-popover-row select {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  color: #323130;
+  font-size: 12px;
 }
 
 .huabi-popover-grid-2 .huabi-popover-row {
