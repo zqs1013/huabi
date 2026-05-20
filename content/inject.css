@@ -1,0 +1,86 @@
+#huabi-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  pointer-events: none;
+  display: none;
+}
+
+#huabi-root.huabi-active {
+  display: block;
+  pointer-events: none;
+}
+
+.huabi-canvas-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#huabi-root.huabi-active.huabi-mouse-mode .huabi-canvas-wrap {
+  pointer-events: none;
+  cursor: default;
+}
+
+#huabi-root.huabi-active.huabi-mouse-mode.huabi-tool-eraser .huabi-canvas-wrap {
+  pointer-events: auto;
+}
+
+#huabi-root.huabi-active.huabi-brush-mode .huabi-canvas-wrap {
+  pointer-events: auto;
+}
+
+.huabi-canvas-wrap.huabi-notes-hidden {
+  visibility: hidden;
+  pointer-events: none !important;
+}
+
+#huabi-highlight {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  pointer-events: none;
+  cursor: inherit;
+  mix-blend-mode: multiply;
+}
+
+#huabi-main,
+#huabi-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: inherit;
+}
+
+#huabi-preview.huabi-hl-preview {
+  mix-blend-mode: multiply;
+}
+
+#huabi-root.huabi-active.huabi-brush-mode .huabi-canvas-wrap {
+  touch-action: none;
+}
+
+#huabi-preview {
+  pointer-events: none;
+}
+
+#huabi-toolbar {
+  pointer-events: auto;
+}
+
+#huabi-tool-popover {
+  pointer-events: auto;
+}
+
+#huabi-settings-backdrop,
+#huabi-settings-panel {
+  pointer-events: auto;
+}
+
+#huabi-root.huabi-settings-open .huabi-canvas-wrap {
+  pointer-events: none !important;
+}

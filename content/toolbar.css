@@ -1,0 +1,245 @@
+#huabi-toolbar {
+  --hb-bg: rgba(255, 255, 255, 0.96);
+  --hb-fg: #323130;
+  --hb-border: #edebe9;
+  --hb-hover: #f3f2f1;
+  --hb-active: #deecf9;
+  --hb-active-fg: #0078d4;
+
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100vw - 24px);
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--hb-bg);
+  color: var(--hb-fg);
+  border: 1px solid var(--hb-border);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 12px;
+  user-select: none;
+  z-index: 2147483647;
+}
+
+#huabi-toolbar .huabi-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 32px;
+  cursor: grab;
+  color: #a19f9d;
+  border-radius: 6px;
+}
+
+#huabi-toolbar .huabi-drag-handle:hover {
+  background: var(--hb-hover);
+}
+
+#huabi-toolbar .huabi-drag-handle:active {
+  cursor: grabbing;
+}
+
+#huabi-toolbar .huabi-drag-handle .huabi-icon {
+  width: 16px;
+  height: 16px;
+}
+
+#huabi-toolbar .huabi-sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: #e1dfdd;
+}
+
+#huabi-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--hb-fg);
+  cursor: pointer;
+}
+
+#huabi-toolbar button:hover {
+  background: var(--hb-hover);
+}
+
+#huabi-toolbar button.huabi-active-tool {
+  background: var(--hb-active);
+  color: var(--hb-active-fg);
+}
+
+#huabi-toolbar button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+#huabi-toolbar .huabi-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+#huabi-toolbar .huabi-icon svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+#huabi-toolbar .huabi-color-btn {
+  position: relative;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 34px;
+  padding: 2px 6px 3px;
+  box-sizing: border-box;
+}
+
+#huabi-toolbar .huabi-color-btn::after {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--tool-color, #252423);
+  flex-shrink: 0;
+}
+
+#huabi-toolbar .huabi-color-btn .huabi-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--tool-color, #323130);
+}
+
+#huabi-toolbar .huabi-color-btn.huabi-active-tool {
+  color: var(--hb-active-fg);
+}
+
+#huabi-toolbar .huabi-color-btn.huabi-active-tool .huabi-icon {
+  color: var(--tool-color, #323130);
+}
+
+.huabi-tool-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.huabi-tool-wrap > .huabi-tool-btn {
+  position: relative;
+  box-sizing: border-box;
+}
+
+.huabi-tool-caret {
+  position: absolute;
+  right: 2px;
+  bottom: 3px;
+  width: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-left: 5px solid transparent;
+  border-bottom: 5px solid #a19f9d;
+  background: transparent;
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0.85;
+}
+
+.huabi-tool-caret:hover,
+.huabi-tool-caret.huabi-caret-open {
+  border-bottom-color: var(--hb-active-fg, #0078d4);
+  opacity: 1;
+}
+
+.huabi-tool-wrap .huabi-tool-btn.huabi-active-tool + .huabi-tool-caret {
+  border-bottom-color: var(--hb-active-fg, #0078d4);
+}
+
+#huabi-tool-popover {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 188px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--hb-bg, rgba(255, 255, 255, 0.98));
+  color: var(--hb-fg, #323130);
+  border: 1px solid var(--hb-border, #edebe9);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 12px;
+  z-index: 2147483647;
+}
+
+#huabi-tool-popover[hidden] {
+  display: none !important;
+}
+
+.huabi-popover-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.huabi-popover-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #605e5c;
+  line-height: 1.4;
+}
+
+.huabi-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.huabi-popover-row > span {
+  flex: 0 0 44px;
+  color: #605e5c;
+}
+
+.huabi-popover-row input[type="range"] {
+  flex: 1;
+  accent-color: #0078d4;
+}
+
+.huabi-popover-row output {
+  flex: 0 0 24px;
+  text-align: right;
+  font-size: 11px;
+  color: #605e5c;
+}
+
+.huabi-popover-row input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  color: #323130;
+  font-size: 12px;
+}

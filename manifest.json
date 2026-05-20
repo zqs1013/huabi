@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Huabi 网页画笔",
+  "version": "1.6.5",
+  "description": "在网页上自由标注：画笔、直线、矩形、表格、荧光笔等",
+  "permissions": ["storage", "activeTab"],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "content/settings.js",
+        "content/shortcuts.js",
+        "content/icons.js",
+        "content/cursors.js",
+        "content/settings-form.js",
+        "content/settings-panel.js",
+        "content/overlay.js"
+      ],
+      "css": [
+        "content/inject.css",
+        "content/toolbar.css",
+        "content/settings-panel.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "toggle-draw": {
+      "suggested_key": {
+        "default": "Alt+Shift+D"
+      },
+      "description": "切换标注模式"
+    }
+  }
+}

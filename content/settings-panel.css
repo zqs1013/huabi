@@ -1,0 +1,224 @@
+#huabi-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 0;
+}
+
+#huabi-settings-backdrop[hidden] {
+  display: none !important;
+}
+
+#huabi-settings-panel {
+  position: fixed;
+  max-height: min(80vh, 560px);
+  overflow: auto;
+  background: var(--hb-bg, rgba(255, 255, 255, 0.98));
+  color: var(--hb-fg, #323130);
+  border: 1px solid var(--hb-border, #edebe9);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+#huabi-settings-panel[hidden] {
+  display: none !important;
+}
+
+.huabi-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hb-border, #edebe9);
+  position: sticky;
+  top: 0;
+  background: inherit;
+  z-index: 1;
+}
+
+.huabi-settings-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.huabi-settings-body {
+  padding: 12px 14px 16px;
+}
+
+.huabi-settings-form .huabi-form-section {
+  margin-bottom: 20px;
+}
+
+.huabi-settings-form h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.huabi-settings-form h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.huabi-form-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #605e5c;
+  line-height: 1.45;
+}
+
+.huabi-tool-block {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #faf9f8;
+  border-radius: 8px;
+  border: 1px solid #edebe9;
+}
+
+.huabi-colors-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.huabi-colors-row input[type="color"] {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.huabi-label-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.huabi-label-row span {
+  flex: 0 0 72px;
+  color: #605e5c;
+}
+
+.huabi-label-row input[type="range"] {
+  flex: 1;
+  accent-color: #0078d4;
+}
+
+.huabi-shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.huabi-shortcut-table th,
+.huabi-shortcut-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid #edebe9;
+}
+
+.huabi-shortcut-table tr.recording {
+  background: #deecf9;
+}
+
+.huabi-shortcut-table .kbd {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  background: #f3f2f1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.huabi-sc-actions button {
+  margin-right: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.huabi-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #edebe9;
+}
+
+.huabi-btn {
+  padding: 8px 14px;
+  border: 1px solid #c8c6c4;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.huabi-btn:hover {
+  background: #f3f2f1;
+}
+
+.huabi-btn.primary {
+  background: #0078d4;
+  border-color: #0078d4;
+  color: #fff;
+}
+
+.huabi-btn.primary:hover {
+  background: #106ebe;
+}
+
+.huabi-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.huabi-btn-icon:hover {
+  background: var(--hb-hover, #f3f2f1);
+}
+
+.huabi-record-hint {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: #fff4ce;
+  color: #8a6914;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.huabi-form-status {
+  font-size: 12px;
+  color: #107c10;
+  margin: 0 0 8px;
+}
+
+.huabi-form-status.error {
+  color: #a4262c;
+}
