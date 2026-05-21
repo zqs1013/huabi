@@ -1847,7 +1847,7 @@
         body.appendChild(fields);
         body.appendChild(
           this._popoverHint(
-            "画笔模式：点击空白新建，单击选中拖动，双击编辑。鼠标模式：点网页操作页面，点中文字/形状可选中拖动。形状与文字橡皮擦擦不掉，Delete/Backspace 删除选中项。升级前旧标注不可点选。"
+            "画笔模式：点击空白新建，单击选中拖动，双击编辑；输入时点击空白遮罩确认。鼠标模式：点网页操作页面，点中文字/形状可选中拖动。Delete/Backspace 删除选中项。升级前旧标注不可点选。"
           )
         );
       }
@@ -2277,12 +2277,9 @@
 
     _closeTextEditor(commit) {
       if (!this._textEditor) return;
-      const { el, x, y, onOutsideDown, editId, fontSize, color } = this._textEditor;
-      if (onOutsideDown) {
-        window.removeEventListener("pointerdown", onOutsideDown, true);
-      }
+      const { el, layer, x, y, editId, fontSize, color } = this._textEditor;
       const text = el.value;
-      el.parentElement?.remove();
+      layer?.remove();
       this._textEditor = null;
       this.root?.classList.remove("huabi-text-editing");
       if (commit) {
@@ -2338,19 +2335,33 @@
       wrap.style.top = `${Math.max(8, Math.min(y, window.innerHeight - 48))}px`;
       wrap.appendChild(ta);
       wrap.addEventListener("pointerdown", (ev) => {
+        ev.stopPropagation();
         if (ev.target !== ta) {
           ev.preventDefault();
           ta.focus();
         }
       });
-      this.root.appendChild(wrap);
-      const onOutsideDown = (ev) => {
-        if (!this._textEditor) return;
-        if (ev.target.closest(".huabi-text-editor-wrap")) return;
-        this._closeTextEditor(true);
-      };
-      window.addEventListener("pointerdown", onOutsideDown, true);
-      this._textEditor = { el: ta, x, y, onOutsideDown, editId, fontSize, color };
+
+      const layer = document.createElement("div");
+      layer.className = "huabi-text-editing-layer";
+      const backdrop = document.createElement("div");
+      backdrop.className = "huabi-text-editing-backdrop";
+      backdrop.title = "点击确认文字";
+      backdrop.addEventListener(
+        "pointerdown",
+        (ev) => {
+          if (ev.button !== 0) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          this._closeTextEditor(true);
+        },
+        true
+      );
+      layer.appendChild(backdrop);
+      layer.appendChild(wrap);
+      this.root.appendChild(layer);
+
+      this._textEditor = { el: ta, layer, x, y, editId, fontSize, color };
       this.root.classList.add("huabi-text-editing");
       ta.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape") {
@@ -2371,7 +2382,7 @@
     _bindCanvasEvents(wrap) {
       const skipTarget = (el) =>
         el.closest(
-          "#huabi-toolbar, #huabi-tool-popover, #huabi-settings-backdrop, #huabi-settings-panel, .huabi-text-editor-wrap"
+          "#huabi-toolbar, #huabi-tool-popover, #huabi-settings-backdrop, #huabi-settings-panel, .huabi-text-editing-layer, .huabi-text-editor-wrap"
         );
 
       const stopTrack = () => {
@@ -2919,7 +2930,7 @@
       const url = tmp.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = url;
-      a.download = "huabi-" + Date.now() + ".png";
+      a.download = "晨曦画笔-" + Date.now() + ".png";
       a.click();
 
       bar.style.display = barDisplay;

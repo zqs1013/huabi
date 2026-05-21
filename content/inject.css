@@ -85,9 +85,23 @@
   pointer-events: none !important;
 }
 
+.huabi-text-editing-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+
+.huabi-text-editing-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  cursor: default;
+}
+
 .huabi-text-editor-wrap {
   position: fixed;
-  z-index: 2147483647;
+  z-index: 1;
   pointer-events: auto;
   min-width: 120px;
   max-width: min(480px, calc(100vw - 24px));
