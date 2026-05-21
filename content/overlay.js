@@ -2152,22 +2152,67 @@
       this._clearCanvasSelection();
     }
 
+    _pageInteractiveSelector() {
+      return [
+        "button",
+        "a[href]",
+        "input",
+        "select",
+        "textarea",
+        "label",
+        "summary",
+        "iframe",
+        "[contenteditable]",
+        '[contenteditable="true"]',
+        '[role="button"]',
+        '[role="textbox"]',
+        '[role="combobox"]',
+        '[onclick]',
+        ".monaco-editor",
+        ".cm-editor",
+        ".CodeMirror",
+        ".ace_editor",
+        '[class*="close"]',
+        ".el-dialog__close",
+        ".el-dialog__headerbtn",
+        ".ant-modal-close",
+        ".anticon-close",
+      ].join(", ");
+    }
+
     _isPageInteractive(el) {
       if (!el?.closest) return false;
       if (el.closest("#huabi-root")) return false;
-      return !!el.closest(
-        'button, a[href], input, select, textarea, label, summary, [role="button"], [onclick], [class*="close"], .el-dialog__close, .el-dialog__headerbtn, .ant-modal-close, .anticon-close'
-      );
+      return !!el.closest(this._pageInteractiveSelector());
     }
 
     _resolvePagePassTarget(el) {
       if (!el) return null;
-      const interactive = el.closest(
-        'button, a[href], input, select, textarea, label, summary, [role="button"], [onclick], [class*="close"], .el-dialog__close, .el-dialog__headerbtn, .ant-modal-close'
-      );
+      const sel = this._pageInteractiveSelector();
+      const interactive = el.closest(sel);
       if (interactive && !interactive.closest("#huabi-root")) return interactive;
       if (!el.closest("#huabi-root")) return el;
       return null;
+    }
+
+    _resolveFocusableFromPassTarget(el) {
+      if (!el) return null;
+      if (el.closest?.("#huabi-root")) return null;
+      const tag = el.tagName?.toLowerCase();
+      if (tag === "iframe") return el;
+      const inner = el.querySelector?.(
+        'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable], [contenteditable="true"]'
+      );
+      if (inner) return inner;
+      if (
+        typeof el.matches === "function" &&
+        el.matches(
+          'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable], [contenteditable="true"]'
+        )
+      ) {
+        return el;
+      }
+      return el;
     }
 
     _findPagePassTarget(clientX, clientY) {
@@ -2175,6 +2220,7 @@
       let fallback = null;
       for (const el of stack) {
         if (!el?.closest || el.closest("#huabi-root")) continue;
+        if (el.tagName === "IFRAME") return el;
         if (!fallback) fallback = el;
         if (this._isPageInteractive(el)) {
           return this._resolvePagePassTarget(el);
@@ -2183,9 +2229,84 @@
       return this._resolvePagePassTarget(fallback);
     }
 
+    _clickIframeTarget(iframe, e) {
+      try {
+        iframe.focus();
+      } catch {
+        /* ignore */
+      }
+      const rect = iframe.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top;
+      let doc;
+      try {
+        doc = iframe.contentDocument;
+      } catch {
+        doc = null;
+      }
+      if (!doc) {
+        try {
+          iframe.click();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      const inner = doc.elementFromPoint(localX, localY);
+      if (!inner) {
+        try {
+          iframe.click();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      const win = iframe.contentWindow;
+      const innerFocus = this._resolveFocusableFromPassTarget(inner) || inner;
+      const opts = {
+        bubbles: true,
+        cancelable: true,
+        view: win,
+        clientX: localX,
+        clientY: localY,
+        screenX: e.screenX,
+        screenY: e.screenY,
+        button: 0,
+        buttons: 0,
+      };
+      try {
+        if (typeof innerFocus.click === "function") {
+          innerFocus.click();
+          if (typeof innerFocus.focus === "function") {
+            try {
+              innerFocus.focus({ preventScroll: true });
+            } catch {
+              innerFocus.focus();
+            }
+          }
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      innerFocus.dispatchEvent(new MouseEvent("mousedown", opts));
+      innerFocus.dispatchEvent(new MouseEvent("mouseup", opts));
+      innerFocus.dispatchEvent(new MouseEvent("click", opts));
+      try {
+        innerFocus.focus?.();
+      } catch {
+        /* ignore */
+      }
+    }
+
     _clickPageTarget(target, e) {
-      const el = this._resolvePagePassTarget(target);
+      const resolved = this._resolvePagePassTarget(target);
+      const el = this._resolveFocusableFromPassTarget(resolved);
       if (!el) return;
+      if (el.tagName === "IFRAME") {
+        this._clickIframeTarget(el, e);
+        return;
+      }
       const opts = {
         bubbles: true,
         cancelable: true,
@@ -2197,9 +2318,21 @@
         button: 0,
         buttons: 0,
       };
+      const focusable =
+        typeof el.matches === "function" &&
+        el.matches(
+          'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"]'
+        );
       try {
         if (typeof el.click === "function") {
           el.click();
+          if (focusable && typeof el.focus === "function") {
+            try {
+              el.focus({ preventScroll: true });
+            } catch {
+              el.focus();
+            }
+          }
           return;
         }
       } catch {
@@ -2413,6 +2546,20 @@
         this.root?.classList.remove("huabi-object-dragging");
       };
 
+      const startPagePassTrack = (pageTarget, e) => {
+        if (this._selectedCanvasObject) this._clearCanvasSelection();
+        pagePassTarget = pageTarget;
+        pagePassStartX = e.clientX;
+        pagePassStartY = e.clientY;
+        window.addEventListener("pointermove", objectMove, true);
+        window.addEventListener("pointerup", objectUp, true);
+        window.addEventListener("pointercancel", objectUp, true);
+        window.addEventListener("mousemove", objectMove, true);
+        window.addEventListener("mouseup", objectUp, true);
+        e.preventDefault();
+        e.stopPropagation();
+      };
+
       const startObjectDrag = (hit, x, y) => {
         this._selectCanvasObject(hit);
         stopObjectTrack();
@@ -2495,7 +2642,24 @@
         }
       };
 
+      /** 鼠标模式：画布 pointer-events:none，仅在命中标注对象时拦截 */
+      const mouseModeDown = (e) => {
+        if (!this.active || this.brushMode) return;
+        if (!this._canCanvasInteract()) return;
+        if (this._textEditor) return;
+        if (this.settingsPanel?.visible) return;
+        if (skipTarget(e.target)) return;
+        if (e.button !== 0) return;
+        const { x, y } = this.engine.getPos(e);
+        const hit = this.engine.hitTestCanvasObject(x, y);
+        if (!hit) return;
+        startObjectDrag(hit, x, y);
+        e.preventDefault();
+        e.stopPropagation();
+      };
+
       const bindDown = (e) => {
+        if (!this.brushMode) return;
         if (!this._canCanvasInteract()) return;
         if (this._textEditor) return;
         if (this.settingsPanel?.visible) return;
@@ -2503,29 +2667,17 @@
         if (e.button !== 0) return;
         const toolId = this._resolveActiveToolId();
         const { x, y } = this.engine.getPos(e);
+        const pageTarget = this._findPagePassTarget(e.clientX, e.clientY);
+        const pageInteractive = pageTarget && this._isPageInteractive(pageTarget);
 
-        if (!this.brushMode) {
-          const pageTarget = this._findPagePassTarget(e.clientX, e.clientY);
-          const pageControl = pageTarget && this._isPageInteractive(pageTarget);
-          const hit = pageControl ? null : this.engine.hitTestCanvasObject(x, y);
-          if (hit) {
-            startObjectDrag(hit, x, y);
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-          }
-          if (!pageTarget) return;
-          if (this._selectedCanvasObject) this._clearCanvasSelection();
-          pagePassTarget = pageTarget;
-          pagePassStartX = e.clientX;
-          pagePassStartY = e.clientY;
-          window.addEventListener("pointermove", objectMove, true);
-          window.addEventListener("pointerup", objectUp, true);
-          window.addEventListener("pointercancel", objectUp, true);
-          window.addEventListener("mousemove", objectMove, true);
-          window.addEventListener("mouseup", objectUp, true);
-          e.preventDefault();
-          e.stopPropagation();
+        const brushCanvasHit =
+          toolId === "text"
+            ? this.engine.hitTestText(x, y)
+            : S.isShapeTool(toolId)
+              ? this.engine.hitTestCanvasObject(x, y)
+              : null;
+        if (pageInteractive && !brushCanvasHit && pageTarget) {
+          startPagePassTrack(pageTarget, e);
           return;
         }
 
@@ -2604,24 +2756,27 @@
       };
 
       wrap.addEventListener("pointerdown", bindDown, true);
+      document.addEventListener("pointerdown", mouseModeDown, true);
 
-      wrap.addEventListener(
-        "dblclick",
-        (e) => {
-          if (!this._canCanvasInteract()) return;
-          if (this._textEditor) return;
-          if (this.settingsPanel?.visible) return;
-          if (skipTarget(e.target)) return;
-          const { x, y } = this.engine.getPos(e);
-          const hit = this.engine.hitTestText(x, y);
-          if (!hit) return;
-          if (this.brushMode && this._resolveActiveToolId() !== "text") return;
-          this._openTextEditorForItem(hit.item);
-          e.preventDefault();
-          e.stopPropagation();
-        },
-        true
-      );
+      const onCanvasDblClick = (e) => {
+        if (!this._canCanvasInteract()) return;
+        if (this._textEditor) return;
+        if (this.settingsPanel?.visible) return;
+        if (skipTarget(e.target)) return;
+        const { x, y } = this.engine.getPos(e);
+        const hit = this.engine.hitTestText(x, y);
+        if (!hit) return;
+        if (this.brushMode && this._resolveActiveToolId() !== "text") return;
+        this._openTextEditorForItem(hit.item);
+        e.preventDefault();
+        e.stopPropagation();
+      };
+
+      wrap.addEventListener("dblclick", onCanvasDblClick, true);
+      document.addEventListener("dblclick", (e) => {
+        if (!this.active || this.brushMode) return;
+        onCanvasDblClick(e);
+      }, true);
 
       this._stopObjectDrag = stopObjectTrack;
     }

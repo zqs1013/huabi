@@ -17,7 +17,12 @@
   pointer-events: none;
 }
 
-#huabi-root.huabi-active.huabi-mouse-mode .huabi-canvas-wrap,
+/* 鼠标模式：画布不拦截事件，页面输入框/编辑器等可原生聚焦 */
+#huabi-root.huabi-active.huabi-mouse-mode .huabi-canvas-wrap {
+  pointer-events: none;
+  cursor: default;
+}
+
 #huabi-root.huabi-active.huabi-brush-mode .huabi-canvas-wrap {
   pointer-events: auto;
   cursor: default;

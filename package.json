@@ -1,6 +1,6 @@
 {
   "name": "huabi",
-  "version": "1.8.6",
+  "version": "1.8.7",
   "main": "index.js",
   "scripts": {
     "icons": "node scripts/generate-icons.js"
