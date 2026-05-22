@@ -21,6 +21,18 @@ async function toggleDrawOnTab(tabId) {
   return res;
 }
 
+async function notifyFontsIndexUpdated() {
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    void sendToTab(tab.id, { type: "FONTS_INDEX_UPDATED" });
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  notifyFontsIndexUpdated();
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "DRAW_STATE_CHANGED" && sender.tab?.id) {
     tabDrawState.set(sender.tab.id, message.active);
@@ -41,6 +53,28 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "FETCH_FONT_BUFFER") {
+    (async () => {
+      const file = message?.file;
+      if (!file || typeof file !== "string") {
+        sendResponse({ ok: false, error: "missing file" });
+        return;
+      }
+      try {
+        const url = chrome.runtime.getURL(`content/fonts/${file}`);
+        const res = await fetch(url);
+        if (!res.ok) {
+          sendResponse({ ok: false, error: `fetch ${res.status}` });
+          return;
+        }
+        const buffer = await res.arrayBuffer();
+        sendResponse({ ok: true, buffer });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
   if (message.type === "POPUP_TOGGLE") {
     (async () => {
       const tab = await getActiveTab();

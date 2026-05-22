@@ -9,11 +9,13 @@
     return n;
   }
 
-  function mount(container, options) {
+  async function mount(container, options) {
     if (container._huabiFormDestroy) {
       container._huabiFormDestroy();
       container._huabiFormDestroy = null;
     }
+
+    await S.ensureTextFontsReady();
 
     const settings = options.settings;
     let recordingId = null;
@@ -44,6 +46,105 @@
       toolsSec.appendChild(buildColorBlock(toolId, state));
     });
     container.appendChild(toolsSec);
+
+    const textSec = el("section", "huabi-form-section");
+    textSec.appendChild(el("h3", "", "文字工具"));
+    textSec.appendChild(
+      el(
+        "p",
+        "huabi-form-hint",
+        "新建或编辑文字时的默认字体。把字体文件放进扩展的 content/fonts 文件夹后，在 chrome://extensions 重新加载本扩展即可自动出现在下方列表（开发时也可运行 npm run fonts:watch 监听目录）。"
+      )
+    );
+    const fontSel = document.createElement("select");
+    fontSel.className = "huabi-text-font-select";
+
+    const fillFontSelect = () => {
+      const prev = fontSel.value;
+      fontSel.innerHTML = "";
+      const builtinGroup = document.createElement("optgroup");
+      builtinGroup.label = "内置";
+      S.BUILTIN_TEXT_FONT_OPTIONS.forEach((opt) => {
+        const o = document.createElement("option");
+        o.value = opt.id;
+        o.textContent = opt.label;
+        builtinGroup.appendChild(o);
+      });
+      fontSel.appendChild(builtinGroup);
+      const bundled = S.getTextFontOptions().filter((o) => o.needBundle && o.file);
+      if (bundled.length) {
+        const customGroup = document.createElement("optgroup");
+        customGroup.label = "自定义（content/fonts）";
+        bundled.forEach((opt) => {
+          const o = document.createElement("option");
+          o.value = opt.id;
+          o.textContent = opt.label;
+          customGroup.appendChild(o);
+        });
+        fontSel.appendChild(customGroup);
+      }
+      fontSel.value = S.normalizeTextFontFamily(prev || state.settings.textFontFamily);
+    };
+
+    fillFontSelect();
+
+    const btnRefreshFonts = el("button", "huabi-btn", "刷新字体列表");
+    btnRefreshFonts.type = "button";
+    btnRefreshFonts.addEventListener("click", () => {
+      btnRefreshFonts.disabled = true;
+      S.rescanBundledFonts()
+        .then(async () => {
+          fillFontSelect();
+          const fid = S.normalizeTextFontFamily(fontSel.value);
+          state.settings.textFontFamily = fid;
+          const ok = await S.ensureTextFont(fid);
+          updateFontPreview();
+          if (options.overlay) await S.applyTextFontToOverlay(options.overlay, fid);
+          const n = S.getTextFontOptions().filter((o) => o.needBundle).length;
+          status.textContent = ok
+            ? `已扫描 ${n} 个自定义字体，并已应用到画布`
+            : `已扫描 ${n} 个字体，但当前字体加载失败，请重新加载扩展后重试`;
+          status.classList.toggle("error", !ok && S.getTextFontOption(fid).needBundle);
+          status.hidden = false;
+        })
+        .catch(() => {
+          status.textContent = "扫描字体失败";
+          status.classList.add("error");
+          status.hidden = false;
+        })
+        .finally(() => {
+          btnRefreshFonts.disabled = false;
+        });
+    });
+    const fontPreview = el("p", "huabi-font-preview", "晨曦画笔 — 示例文字 ABC 123");
+    const updateFontPreview = async () => {
+      const fid = S.normalizeTextFontFamily(fontSel.value);
+      const opt = S.getTextFontOption(fid);
+      let ok = true;
+      if (opt.needBundle) ok = await S.ensureTextFont(fid);
+      fontPreview.style.fontFamily = S.getDomFontFamily(fid);
+      fontPreview.classList.toggle("huabi-font-preview--failed", opt.needBundle && !ok);
+      return ok;
+    };
+    fontSel.addEventListener("change", () => {
+      const fid = S.normalizeTextFontFamily(fontSel.value);
+      state.settings.textFontFamily = fid;
+      void (async () => {
+        const ok = await updateFontPreview();
+        if (options.overlay) await S.applyTextFontToOverlay(options.overlay, fid);
+        if (!ok && S.getTextFontOption(fid).needBundle) {
+          status.textContent = `字体「${S.getTextFontOption(fid).label}」加载失败，请重新加载扩展`;
+          status.classList.add("error");
+          status.hidden = false;
+        }
+        scheduleAutoSave();
+      })();
+    });
+    void updateFontPreview();
+    textSec.appendChild(labelRow("默认字体", fontSel));
+    textSec.appendChild(btnRefreshFonts);
+    textSec.appendChild(fontPreview);
+    container.appendChild(textSec);
 
     const tbSec = el("section", "huabi-form-section");
     tbSec.appendChild(el("h3", "", "工具栏显示"));

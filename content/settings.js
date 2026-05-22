@@ -74,27 +74,317 @@
     return out;
   }
 
-  const TEXT_FONT_FAMILY = "HuabiHandwriting";
-  const TEXT_FONT_CSS = `"${TEXT_FONT_FAMILY}", "寒蝉手拙体", "HCSZT", cursive`;
-  const TEXT_FONT_FILE = "content/fonts/寒蝉手拙体.ttf";
+  const DEFAULT_TEXT_FONT_FAMILY = "system";
+  const LEGACY_TEXT_FONT_ALIASES = {
+    handwriting: "font-寒蝉手拙体",
+    "font-JasonHandwriting1": "font-QingSongShouXieTi1",
+    "font-QingSongShouXieTi1-2": "font-QingSongShouXieTi1",
+  };
 
-  function getTextFontCss() {
-    return TEXT_FONT_CSS;
+  /** 内置字体（非 content/fonts 目录） */
+  const BUILTIN_TEXT_FONT_OPTIONS = [
+    {
+      id: "system",
+      label: "系统默认",
+      css: 'system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif',
+      needBundle: false,
+    },
+    {
+      id: "yahei",
+      label: "微软雅黑",
+      css: '"Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif',
+      needBundle: false,
+    },
+    {
+      id: "song",
+      label: "宋体",
+      css: '"SimSun", "Songti SC", "Noto Serif SC", serif',
+      needBundle: false,
+    },
+    {
+      id: "kai",
+      label: "楷体",
+      css: '"KaiTi", "STKaiti", "楷体", serif',
+      needBundle: false,
+    },
+    {
+      id: "mono",
+      label: "等宽",
+      css: 'ui-monospace, "Cascadia Code", Consolas, monospace',
+      needBundle: false,
+    },
+  ];
+
+  let TEXT_FONT_OPTIONS = [...BUILTIN_TEXT_FONT_OPTIONS];
+  let _textFontsInitPromise = null;
+  const _fontFaceCache = new Map();
+
+  function getTextFontOptions() {
+    return TEXT_FONT_OPTIONS;
   }
 
-  function injectTextFontFace() {
-    if (injectTextFontFace._done) return;
-    const id = "huabi-text-font-face";
-    if (document.getElementById(id)) {
-      injectTextFontFace._done = true;
+  function normalizeBundledEntry(entry) {
+    if (!entry?.file) return null;
+    const base = String(entry.file).replace(/\.[^.]+$/, "");
+    const family = entry.family || slugFamilyFromBase(base);
+    const id = entry.id || fontIdFromBase(base);
+    return {
+      id,
+      label: entry.label || base,
+      css: entry.css || `"${family}"`,
+      needBundle: true,
+      file: entry.file,
+      family,
+    };
+  }
+
+  function slugFamilyFromBase(base) {
+    const safe = base.replace(/[^\w\u4e00-\u9fff-]+/g, "_").replace(/^_|_$/g, "");
+    return `HuabiFont_${safe || "Custom"}`;
+  }
+
+  function fontIdFromBase(base) {
+    const safe = base.replace(/[^\w\u4e00-\u9fff-]+/g, "_").replace(/^_|_$/g, "");
+    return `font-${safe || "custom"}`;
+  }
+
+  function mergeBundledEntries(...lists) {
+    const map = new Map();
+    for (const list of lists) {
+      for (const raw of list || []) {
+        const entry = normalizeBundledEntry(raw);
+        if (entry) map.set(entry.id, entry);
+      }
+    }
+    return [...map.values()];
+  }
+
+  function rebuildTextFontOptions(bundledEntries) {
+    const bundled = (bundledEntries || []).map((entry) =>
+      normalizeBundledEntry(entry)
+    ).filter(Boolean);
+    TEXT_FONT_OPTIONS = [...BUILTIN_TEXT_FONT_OPTIONS, ...bundled];
+  }
+
+  function invalidateTextFontsCache() {
+    _textFontsInitPromise = null;
+    _fontFaceCache.clear();
+  }
+
+  function bundledFontUrl(file) {
+    return chrome.runtime.getURL(`content/fonts/${file}`);
+  }
+
+  function bundledFontUrlEncoded(file) {
+    const encoded = String(file)
+      .split("/")
+      .map((seg) => encodeURIComponent(seg))
+      .join("/");
+    return chrome.runtime.getURL(`content/fonts/${encoded}`);
+  }
+
+  async function fetchBundledFontBufferViaPage(file) {
+    const urls = [bundledFontUrl(file), bundledFontUrlEncoded(file)];
+    let lastErr;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) return res.arrayBuffer();
+        lastErr = new Error(`fetch ${res.status} ${url}`);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("page fetch failed");
+  }
+
+  async function fetchBundledFontBufferViaBackground(file) {
+    const res = await chrome.runtime.sendMessage({
+      type: "FETCH_FONT_BUFFER",
+      file,
+    });
+    if (res?.ok && res.buffer) return res.buffer;
+    throw new Error(res?.error || "background fetch failed");
+  }
+
+  async function fetchBundledFontBuffer(entry) {
+    if (!entry?.file) return null;
+    try {
+      return await fetchBundledFontBufferViaPage(entry.file);
+    } catch (pageErr) {
+      try {
+        return await fetchBundledFontBufferViaBackground(entry.file);
+      } catch (bgErr) {
+        throw new Error(
+          `page: ${pageErr?.message || pageErr}; background: ${bgErr?.message || bgErr}`
+        );
+      }
+    }
+  }
+
+  async function registerBundledFontFace(entry) {
+    if (!entry?.family || !entry?.file) return null;
+    if (_fontFaceCache.has(entry.id)) return _fontFaceCache.get(entry.id);
+    let buf;
+    try {
+      buf = await fetchBundledFontBuffer(entry);
+    } catch (err) {
+      console.warn("[huabi] 读取字体文件失败:", entry.file, err?.message || err);
+      return null;
+    }
+    try {
+      const face = new FontFace(entry.family, buf);
+      const loaded = await face.load();
+      document.fonts.add(loaded);
+      _fontFaceCache.set(entry.id, loaded);
+      return loaded;
+    } catch (err) {
+      console.warn("[huabi] 字体加载失败:", entry.file, err);
+      return null;
+    }
+  }
+
+  function injectBundledFontFaces(bundledEntries) {
+    const styleId = "huabi-bundled-font-faces";
+    let el = document.getElementById(styleId);
+    if (!el) {
+      el = document.createElement("style");
+      el.id = styleId;
+      (document.head || document.documentElement).appendChild(el);
+    }
+    if (!bundledEntries?.length) {
+      el.textContent = "";
       return;
     }
-    const url = chrome.runtime.getURL(TEXT_FONT_FILE);
-    const style = document.createElement("style");
-    style.id = id;
-    style.textContent = `@font-face{font-family:"${TEXT_FONT_FAMILY}";font-style:normal;font-weight:400;font-display:swap;src:url("${url}") format("truetype");}`;
-    (document.head || document.documentElement).appendChild(style);
-    injectTextFontFace._done = true;
+    el.textContent = "";
+  }
+
+  async function fetchBundledFontManifest() {
+    const bust = `?t=${Date.now()}`;
+    const sources = await Promise.all([
+      fetch(chrome.runtime.getURL("content/fonts/manifest.json" + bust))
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      fetch(chrome.runtime.getURL("content/fonts/bundle-index.json" + bust))
+        .then(async (r) => {
+          if (!r.ok) return [];
+          const data = await r.json();
+          const files = data?.files || [];
+          return files.map((file) => {
+            const base = file.replace(/\.[^.]+$/, "");
+            const family = slugFamilyFromBase(base);
+            return {
+              id: fontIdFromBase(base),
+              file,
+              label: base,
+              family,
+              css: `"${family}"`,
+            };
+          });
+        })
+        .catch(() => []),
+    ]);
+    return mergeBundledEntries(window.__HUABI_BUNDLED_FONTS, ...sources);
+  }
+
+  function ensureTextFontsReady() {
+    if (!_textFontsInitPromise) {
+      _textFontsInitPromise = (async () => {
+        const bundled = await fetchBundledFontManifest();
+        rebuildTextFontOptions(bundled);
+        injectBundledFontFaces(bundled);
+      })();
+    }
+    return _textFontsInitPromise;
+  }
+
+  /** 重新拉取 content/fonts 索引（扩展重新加载后会读到最新列表） */
+  function rescanBundledFonts() {
+    invalidateTextFontsCache();
+    return ensureTextFontsReady();
+  }
+
+  function migrateTextFontFamilyId(raw) {
+    if (typeof raw !== "string" || !raw) return DEFAULT_TEXT_FONT_FAMILY;
+    return LEGACY_TEXT_FONT_ALIASES[raw] || raw;
+  }
+
+  function isKnownTextFontId(id) {
+    if (!id || typeof id !== "string") return false;
+    if (BUILTIN_TEXT_FONT_OPTIONS.some((o) => o.id === id)) return true;
+    if (TEXT_FONT_OPTIONS.some((o) => o.id === id)) return true;
+    if (window.__HUABI_BUNDLED_FONTS?.some((f) => f.id === id)) return true;
+    return id.startsWith("font-");
+  }
+
+  function normalizeTextFontFamily(raw) {
+    const id = migrateTextFontFamilyId(raw);
+    return isKnownTextFontId(id) ? id : DEFAULT_TEXT_FONT_FAMILY;
+  }
+
+  function inferBundledEntryFromFontId(fid) {
+    const fromRegistry = window.__HUABI_BUNDLED_FONTS?.find((f) => f.id === fid);
+    if (fromRegistry) return normalizeBundledEntry(fromRegistry);
+    const fromOpts = TEXT_FONT_OPTIONS.find((o) => o.id === fid && o.file);
+    if (fromOpts) return fromOpts;
+    return null;
+  }
+
+  function getTextFontOption(id) {
+    const fid = migrateTextFontFamilyId(id);
+    const hit = TEXT_FONT_OPTIONS.find((o) => o.id === fid);
+    if (hit) return hit;
+    const bundled = window.__HUABI_BUNDLED_FONTS?.find((f) => f.id === fid);
+    if (bundled) return normalizeBundledEntry(bundled);
+    const inferred = inferBundledEntryFromFontId(fid);
+    if (inferred) return inferred;
+    return BUILTIN_TEXT_FONT_OPTIONS[0];
+  }
+
+  function getTextFontCss(settingsOrId) {
+    const id =
+      typeof settingsOrId === "string"
+        ? settingsOrId
+        : settingsOrId?.textFontFamily;
+    return getTextFontOption(id).css;
+  }
+
+  /** DOM 元素 style.fontFamily（自定义字体须先 ensureTextFont） */
+  function getDomFontFamily(settingsOrId) {
+    const opt = getTextFontOption(
+      typeof settingsOrId === "string"
+        ? settingsOrId
+        : settingsOrId?.textFontFamily
+    );
+    if (!opt.needBundle) return opt.css;
+    return `"${opt.family}"`;
+  }
+
+  function syncOverlayTextFont(overlay) {
+    if (!overlay?.engine) return DEFAULT_TEXT_FONT_FAMILY;
+    const fid = normalizeTextFontFamily(
+      overlay.settings?.textFontFamily ?? overlay.engine.textFontFamily
+    );
+    if (overlay.settings) overlay.settings.textFontFamily = fid;
+    overlay.engine.textFontFamily = fid;
+    return fid;
+  }
+
+  /** Canvas / measureText 用，确保 family 名与 @font-face 一致 */
+  function getCanvasFont(fontSize, settingsOrId) {
+    const opt = getTextFontOption(
+      typeof settingsOrId === "string"
+        ? settingsOrId
+        : settingsOrId?.textFontFamily
+    );
+    const size = Math.max(8, Math.round(fontSize || 16));
+    if (!opt.needBundle) return `${size}px ${opt.css}`;
+    return `${size}px "${opt.family}"`;
+  }
+
+  /** @deprecated 使用 ensureTextFontsReady */
+  function injectTextFontFace() {
+    return ensureTextFontsReady();
   }
 
   const DEFAULT_SHORTCUTS = {
@@ -227,6 +517,7 @@
       coordStep: 1,
       coordShowY: false,
       textFontSize: 0,
+      textFontFamily: DEFAULT_TEXT_FONT_FAMILY,
       toolbarPosition: null,
       toolbarVisible: getDefaultToolbarVisible(),
       arrowEnds: "end",
@@ -260,6 +551,7 @@
       coordTicks: raw?.coordTicks ?? 5,
       coordShowY: raw?.coordShowY === true,
       textFontSize: raw?.textFontSize ?? 0,
+      textFontFamily: normalizeTextFontFamily(raw?.textFontFamily),
     };
     const pos = raw?.toolbarPosition;
     if (
@@ -322,6 +614,7 @@
   }
 
   async function loadSettings() {
+    await ensureTextFontsReady();
     const [syncData, localData] = await Promise.all([
       chrome.storage.sync.get([SETTINGS_KEY, LEGACY_KEY]),
       chrome.storage.local.get([SETTINGS_KEY]),
@@ -368,18 +661,52 @@
     return Math.max(8, Math.min(120, Math.round(raw)));
   }
 
-  let _textFontReady = null;
-  function ensureTextFont() {
-    injectTextFontFace();
-    if (_textFontReady) return _textFontReady;
-    _textFontReady = document.fonts
-      .load(`48px ${TEXT_FONT_FAMILY}`)
-      .then(() => document.fonts.ready)
-      .catch(() => {});
-    return _textFontReady;
+  async function ensureTextFont(settingsOrId) {
+    const opt = getTextFontOption(
+      typeof settingsOrId === "string"
+        ? settingsOrId
+        : settingsOrId?.textFontFamily
+    );
+    if (!opt.needBundle) return true;
+    await ensureTextFontsReady();
+    if (!_fontFaceCache.has(opt.id)) {
+      const loaded = await registerBundledFontFace(opt);
+      if (!loaded) return false;
+    }
+    try {
+      await document.fonts.load(getCanvasFont(16, opt.id));
+      await document.fonts.ready;
+    } catch (err) {
+      console.warn("[huabi] document.fonts.load 失败:", opt.file, err);
+      return false;
+    }
+    return true;
+  }
+
+  async function ensureTextFonts(fontIds) {
+    const ids = [...new Set((fontIds || []).map((id) => normalizeTextFontFamily(id)))];
+    let ok = true;
+    for (const id of ids) {
+      if (!(await ensureTextFont(id))) ok = false;
+    }
+    return ok;
+  }
+
+  /** 将当前文字字体应用到画布并立即重绘 */
+  async function applyTextFontToOverlay(overlay, fontId) {
+    if (!overlay?.engine) return false;
+    const fid = normalizeTextFontFamily(
+      fontId ?? overlay.settings?.textFontFamily ?? overlay.engine.textFontFamily
+    );
+    if (overlay.settings) overlay.settings.textFontFamily = fid;
+    overlay.engine.textFontFamily = fid;
+    const ok = await ensureTextFont(fid);
+    await overlay.engine.renderTexts();
+    return ok;
   }
 
   async function saveSettings(settings) {
+    await ensureTextFontsReady();
     const normalized = normalizeLoadedSettings(settings);
     await writeSettingsToStorage(normalized);
     return normalized;
@@ -462,18 +789,38 @@
     isEraserTool,
     isTextTool,
     profileTargetTool,
+    BUILTIN_TEXT_FONT_OPTIONS,
+    getTextFontOptions,
+    ensureTextFontsReady,
+    rescanBundledFonts,
+    invalidateTextFontsCache,
+    DEFAULT_TEXT_FONT_FAMILY,
+    normalizeTextFontFamily,
+    migrateTextFontFamilyId,
+    getTextFontOption,
     getTextFontCss,
+    getDomFontFamily,
+    syncOverlayTextFont,
+    getCanvasFont,
+    registerBundledFontFace,
     injectTextFontFace,
-    TEXT_FONT_FAMILY,
+    injectBundledFontFaces,
+    rebuildTextFontOptions,
     getPageDefaultFontSize,
     getDefaultTextFontSize,
     resolveTextFontSize,
     ensureTextFont,
+    ensureTextFonts,
+    applyTextFontToOverlay,
   };
+
+  if (window.__HUABI_BUNDLED_FONTS?.length) {
+    rebuildTextFontOptions(mergeBundledEntries(window.__HUABI_BUNDLED_FONTS));
+  }
 
   try {
     if (typeof document !== "undefined" && chrome?.runtime?.getURL) {
-      injectTextFontFace();
+      void ensureTextFontsReady();
     }
   } catch {
     /* ignore */

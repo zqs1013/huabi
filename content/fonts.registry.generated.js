@@ -1,0 +1,24 @@
+/* 自动生成，请勿手改。运行 npm run fonts 或 npm run fonts:watch */
+window.__HUABI_BUNDLED_FONTS = [
+  {
+    "id": "font-寒蝉手拙体",
+    "file": "寒蝉手拙体.ttf",
+    "label": "寒蝉手拙体",
+    "family": "HuabiFont_寒蝉手拙体",
+    "css": "\"HuabiFont_寒蝉手拙体\""
+  },
+  {
+    "id": "font-也字工厂苍南手迹",
+    "file": "也字工厂苍南手迹.ttf",
+    "label": "也字工厂苍南手迹",
+    "family": "HuabiFont_也字工厂苍南手迹",
+    "css": "\"HuabiFont_也字工厂苍南手迹\""
+  },
+  {
+    "id": "font-QingSongShouXieTi1",
+    "file": "QingSongShouXieTi1.ttf",
+    "label": "清松手写体",
+    "family": "HuabiFont_QingSongShouXieTi1",
+    "css": "\"HuabiFont_QingSongShouXieTi1\""
+  }
+];

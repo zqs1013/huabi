@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "晨曦画笔",
-  "version": "1.8.7",
+  "version": "1.8.8",
   "description": "在网页上自由标注：画笔、直线、矩形、表格、荧光笔、文字等",
   "permissions": ["storage", "activeTab"],
   "action": {
@@ -27,6 +27,7 @@
     {
       "matches": ["<all_urls>"],
       "js": [
+        "content/fonts.registry.generated.js",
         "content/settings.js",
         "content/shortcuts.js",
         "content/icons.generated.js",
@@ -37,24 +38,30 @@
         "content/overlay.js"
       ],
       "css": [
-        "content/fonts.css",
         "content/inject.css",
         "content/toolbar.css",
         "content/settings-panel.css"
       ],
-      "web_accessible_resources": [
-        {
-          "resources": ["content/fonts/*"],
-          "matches": ["<all_urls>"]
-        }
-      ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/fonts/manifest.json",
+        "content/fonts/bundle-index.json",
+        "content/fonts/*.ttf",
+        "content/fonts/*.otf",
+        "content/fonts/*.woff",
+        "content/fonts/*.woff2"
+      ],
+      "matches": ["<all_urls>"]
     }
   ],
   "commands": {
     "toggle-draw": {
       "suggested_key": {
-        "default": "Alt+Shift+D"
+        "default": "Alt+1"
       },
       "description": "切换标注模式"
     }

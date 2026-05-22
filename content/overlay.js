@@ -40,6 +40,7 @@
       this.coordStep = settings.coordStep ?? 1;
       this.coordShowY = settings.coordShowY === true;
       this.textFontSize = settings.textFontSize ?? 0;
+      this.textFontFamily = S.normalizeTextFontFamily(settings.textFontFamily);
       this.arrowEnds = settings.arrowEnds === "both" ? "both" : "end";
       this.history = [];
       this.redoStack = [];
@@ -65,6 +66,7 @@
       this.coordStep = settings.coordStep ?? 1;
       this.coordShowY = settings.coordShowY === true;
       this.textFontSize = settings.textFontSize ?? 0;
+      this.textFontFamily = S.normalizeTextFontFamily(settings.textFontFamily);
       this.arrowEnds = settings.arrowEnds === "both" ? "both" : "end";
     }
 
@@ -95,10 +97,18 @@
       return this.getProfile(target);
     }
 
-    _paintTextOnCtx(ctx, text, x, y, fontSize, color) {
+    _resolveItemFontFamily(item) {
+      if (!item.fontFamily) {
+        item.fontFamily = S.normalizeTextFontFamily(this.textFontFamily);
+      }
+      return item.fontFamily;
+    }
+
+    _paintTextOnCtx(ctx, text, x, y, fontSize, color, fontFamily) {
       const lineHeight = fontSize * 1.25;
+      const fam = fontFamily || this.textFontFamily;
       ctx.save();
-      ctx.font = `${fontSize}px ${S.getTextFontCss()}`;
+      ctx.font = S.getCanvasFont(fontSize, fam);
       ctx.fillStyle = color;
       ctx.textBaseline = "top";
       text.split("\n").forEach((line, i) => {
@@ -107,12 +117,13 @@
       ctx.restore();
     }
 
-    measureTextBlock(text, fontSize) {
+    measureTextBlock(text, fontSize, fontFamily) {
       const lines = text.split("\n");
       const lineHeight = fontSize * 1.25;
+      const fam = fontFamily || this.textFontFamily;
       const ctx = this.textCtx;
       ctx.save();
-      ctx.font = `${fontSize}px ${S.getTextFontCss()}`;
+      ctx.font = S.getCanvasFont(fontSize, fam);
       let w = 0;
       for (const line of lines) {
         w = Math.max(w, ctx.measureText(line).width);
@@ -125,19 +136,42 @@
       return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     }
 
-    addTextItem({ id, text, x, y, fontSize, color }) {
-      const { w, h } = this.measureTextBlock(text, fontSize);
-      this.textItems.push({ id: id || this._newTextId(), text, x, y, fontSize, color, w, h });
+    addTextItem({ id, text, x, y, fontSize, color, fontFamily }) {
+      const fam = S.normalizeTextFontFamily(fontFamily ?? this.textFontFamily);
+      const { w, h } = this.measureTextBlock(text, fontSize, fam);
+      this.textItems.push({
+        id: id || this._newTextId(),
+        text,
+        x,
+        y,
+        fontSize,
+        color,
+        fontFamily: fam,
+        w,
+        h,
+      });
     }
 
     updateTextItem(id, patch) {
       let item = this.textItems.find((t) => t.id === id);
       if (!item) {
-        item = { id, text: "", x: 0, y: 0, fontSize: 16, color: "#252423" };
+        item = {
+          id,
+          text: "",
+          x: 0,
+          y: 0,
+          fontSize: 16,
+          color: "#252423",
+          fontFamily: S.normalizeTextFontFamily(this.textFontFamily),
+        };
         this.textItems.push(item);
       }
       Object.assign(item, patch);
-      const { w, h } = this.measureTextBlock(item.text, item.fontSize);
+      if (patch.fontFamily != null) {
+        item.fontFamily = S.normalizeTextFontFamily(patch.fontFamily);
+      }
+      const fam = this._resolveItemFontFamily(item);
+      const { w, h } = this.measureTextBlock(item.text, item.fontSize, fam);
       item.w = w;
       item.h = h;
     }
@@ -147,7 +181,12 @@
       if (i >= 0) this.textItems.splice(i, 1);
     }
 
-    renderTexts() {
+    async renderTexts() {
+      const fontIds = [this.textFontFamily];
+      for (const item of this.textItems) {
+        fontIds.push(this._resolveItemFontFamily(item));
+      }
+      await S.ensureTextFonts(fontIds);
       const w = window.innerWidth;
       const h = window.innerHeight;
       this.textCtx.clearRect(0, 0, w, h);
@@ -158,7 +197,8 @@
           item.x,
           item.y,
           item.fontSize,
-          item.color
+          item.color,
+          item.fontFamily
         );
       }
     }
@@ -617,7 +657,12 @@
         this.mainCtx.putImageData(snap.main, 0, 0);
         this.highlightCtx.putImageData(snap.highlight, 0, 0);
         this.textItems = snap.textItems
-          ? snap.textItems.map((t) => ({ ...t }))
+          ? snap.textItems.map((t) => ({
+              ...t,
+              fontFamily: S.normalizeTextFontFamily(
+                t.fontFamily ?? this.textFontFamily
+              ),
+            }))
           : [];
         this.shapeItems = snap.shapeItems
           ? snap.shapeItems.map((s) => ({ ...s }))
@@ -1309,7 +1354,7 @@
       );
       ctx.save();
       ctx.fillStyle = ctx.strokeStyle;
-      ctx.font = `${fontSize}px ${S.getTextFontCss()}`;
+      ctx.font = S.getCanvasFont(fontSize, this.textFontFamily);
 
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -1438,6 +1483,8 @@
       this.textCanvas = text;
       this.previewCanvas = preview;
       this.engine = new DrawingEngine(main, highlight, shape, text, preview, this.settings);
+      const initFont = S.syncOverlayTextFont(this);
+      await S.ensureTextFont(initFont);
       this.toolbar = root.querySelector("#huabi-toolbar");
       this.toolPopover = root.querySelector("#huabi-tool-popover");
       this.settingsPanel = new window.HuabiSettingsPanel(root, this);
@@ -1457,15 +1504,10 @@
         const next = changes[S.SETTINGS_KEY].newValue;
         if (next) {
           this.settings = next;
-          this.engine.applySettings(next);
-          this.engine.tableRows = next.tableRows ?? 3;
-          this.engine.tableCols = next.tableCols ?? 3;
-          this.engine.coordTicks = next.coordTicks ?? 5;
-          this.engine.coordStart = next.coordStart ?? 0;
-          this.engine.coordStep = next.coordStep ?? 1;
-          this.engine.coordShowY = next.coordShowY === true;
-          this.engine.textFontSize = next.textFontSize ?? 0;
-          this.engine.arrowEnds = next.arrowEnds === "both" ? "both" : "end";
+          void (async () => {
+            this.engine.applySettings(next);
+            await S.applyTextFontToOverlay(this, next.textFontFamily);
+          })();
           this.syncToolbarFromTool();
           this._updatePenButtonColors();
           this._applyToolbarPosition();
@@ -2186,6 +2228,31 @@
       return !!el.closest(this._pageInteractiveSelector());
     }
 
+    /** 画笔模式下笔/荧光笔/橡皮：仅按钮、输入框等穿透，iframe/编辑器上直接绘图 */
+    _isBrushPassControl(el) {
+      if (!el?.closest) return false;
+      if (el.closest("#huabi-root")) return false;
+      if (el.tagName === "IFRAME") return false;
+      if (el.closest(".monaco-editor, .cm-editor, .CodeMirror, .ace_editor")) return false;
+      if (
+        el.closest('[contenteditable], [contenteditable="true"], [role="textbox"]') &&
+        !el.closest("input, textarea, select")
+      ) {
+        return false;
+      }
+      return !!el.closest(
+        'button, a[href], input, select, textarea, label, summary, [role="button"], [onclick], [class*="close"], .el-dialog__close, .el-dialog__headerbtn, .ant-modal-close, .anticon-close'
+      );
+    }
+
+    _shouldBrushPagePass(toolId, pageTarget) {
+      if (!pageTarget) return false;
+      if (S.isPenTool(toolId) || S.isHighlighterTool(toolId) || toolId === "eraser") {
+        return this._isBrushPassControl(pageTarget);
+      }
+      return this._isPageInteractive(pageTarget);
+    }
+
     _resolvePagePassTarget(el) {
       if (!el) return null;
       const sel = this._pageInteractiveSelector();
@@ -2350,6 +2417,7 @@
         initialText: item.text,
         fontSize: item.fontSize,
         color: item.color,
+        fontFamily: item.fontFamily,
       });
     }
 
@@ -2410,14 +2478,14 @@
 
     _closeTextEditor(commit) {
       if (!this._textEditor) return;
-      const { el, layer, x, y, editId, fontSize, color } = this._textEditor;
+      const { el, layer, x, y, editId, fontSize, color, fontFamily } = this._textEditor;
       const text = el.value;
       layer?.remove();
       this._textEditor = null;
       this.root?.classList.remove("huabi-text-editing");
       if (commit) {
         if (text.trim()) {
-          this._commitTextToCanvas(text, x, y, { editId, fontSize, color });
+          this._commitTextToCanvas(text, x, y, { editId, fontSize, color, fontFamily });
         } else if (editId) {
           this.engine.pushHistory();
           this.engine.renderTexts();
@@ -2428,24 +2496,32 @@
     }
 
     async _commitTextToCanvas(text, x, y, opts = {}) {
-      const { editId, fontSize: fs, color: col } = opts;
-      await S.ensureTextFont();
+      const { editId, fontSize: fs, color: col, fontFamily: itemFont } = opts;
+      const fid = S.syncOverlayTextFont(this);
       const fontSize = fs ?? S.resolveTextFontSize(this.settings, this.engine);
       const color = col ?? this.engine.getProfile(this.engine.lastPenTool || S.DEFAULT_PEN_TOOL).color;
+      const fontFamily = itemFont
+        ? S.normalizeTextFontFamily(itemFont)
+        : fid;
+      await S.ensureTextFont(fontFamily);
       this.engine.pushHistory();
       if (editId) {
-        this.engine.updateTextItem(editId, { text, x, y, fontSize, color });
+        this.engine.updateTextItem(editId, { text, x, y, fontSize, color, fontFamily });
       } else {
-        this.engine.addTextItem({ text, x, y, fontSize, color });
+        this.engine.addTextItem({ text, x, y, fontSize, color, fontFamily: fid });
       }
-      this.engine.renderTexts();
+      await this.engine.renderTexts();
     }
 
     async _openTextEditor(x, y, opts = {}) {
       this._closeTextEditor(false);
       this._closeToolPopover();
-      await S.ensureTextFont();
+      const fid = S.syncOverlayTextFont(this);
       const editId = opts.editId ?? null;
+      const editorFont = editId
+        ? S.normalizeTextFontFamily(opts.fontFamily ?? fid)
+        : fid;
+      await S.ensureTextFont(editorFont);
       const fontSize = opts.fontSize ?? S.resolveTextFontSize(this.settings, this.engine);
       const color =
         opts.color ?? this.engine.getProfile(this.engine.lastPenTool || S.DEFAULT_PEN_TOOL).color;
@@ -2460,7 +2536,7 @@
       ta.className = "huabi-text-editor";
       ta.rows = 1;
       ta.placeholder = "输入文字…";
-      ta.style.fontFamily = S.getTextFontCss();
+      ta.style.fontFamily = S.getDomFontFamily(editorFont);
       ta.style.fontSize = `${fontSize}px`;
       ta.style.color = color;
       if (opts.initialText) ta.value = opts.initialText;
@@ -2494,7 +2570,7 @@
       layer.appendChild(wrap);
       this.root.appendChild(layer);
 
-      this._textEditor = { el: ta, layer, x, y, editId, fontSize, color };
+      this._textEditor = { el: ta, layer, x, y, editId, fontSize, color, fontFamily: editorFont };
       this.root.classList.add("huabi-text-editing");
       ta.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape") {
@@ -2668,7 +2744,7 @@
         const toolId = this._resolveActiveToolId();
         const { x, y } = this.engine.getPos(e);
         const pageTarget = this._findPagePassTarget(e.clientX, e.clientY);
-        const pageInteractive = pageTarget && this._isPageInteractive(pageTarget);
+        const pageInteractive = this._shouldBrushPagePass(toolId, pageTarget);
 
         const brushCanvasHit =
           toolId === "text"
@@ -3030,6 +3106,7 @@
 
       if (on) {
         this.settings = await S.loadSettings();
+        await S.ensureTextFont(this.settings);
         this.engine.applySettings(this.settings);
         this.engine.tableRows = this.settings.tableRows ?? 3;
         this.engine.tableCols = this.settings.tableCols ?? 3;
@@ -3102,26 +3179,20 @@
         sendResponse({ active: this.active });
         return true;
       }
+      if (msg.type === "FONTS_INDEX_UPDATED") {
+        S.invalidateTextFontsCache();
+        void (async () => {
+          await S.rescanBundledFonts();
+          await S.applyTextFontToOverlay(this, this.settings.textFontFamily);
+        })();
+        sendResponse({ ok: true });
+        return true;
+      }
       if (msg.type === "RELOAD_SETTINGS") {
-        S.loadSettings().then((s) => {
+        S.loadSettings().then(async (s) => {
           this.settings = s;
-          this.engine.toolProfiles = s.toolProfiles;
-          this.engine.lastPenTool = s.lastPenTool || S.DEFAULT_PEN_TOOL;
-          this.engine.tableRows = s.tableRows ?? 3;
-          this.engine.tableCols = s.tableCols ?? 3;
-          this.engine.coordTicks = s.coordTicks ?? 5;
-          this.engine.coordStart = s.coordStart ?? 0;
-          this.engine.coordStep = s.coordStep ?? 1;
-          this.engine.coordShowY = s.coordShowY === true;
-          this.settings.tableRows = s.tableRows ?? 3;
-          this.settings.tableCols = s.tableCols ?? 3;
-          this.settings.coordTicks = s.coordTicks ?? 5;
-          this.settings.coordStart = s.coordStart ?? 0;
-          this.settings.coordStep = s.coordStep ?? 1;
-          this.settings.coordShowY = s.coordShowY === true;
-          this.engine.textFontSize = s.textFontSize ?? 0;
-          this.settings.textFontSize = s.textFontSize ?? 0;
-          this.engine.arrowEnds = s.arrowEnds === "both" ? "both" : "end";
+          this.engine.applySettings(s);
+          await S.applyTextFontToOverlay(this, s.textFontFamily);
           this.syncToolbarFromTool();
           this._updatePenButtonColors();
           this._applyToolbarPosition();

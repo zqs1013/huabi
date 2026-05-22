@@ -225,6 +225,32 @@
   font-size: 12px;
 }
 
+.huabi-text-font-select {
+  min-width: 200px;
+  max-width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #d1d1d1;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.huabi-font-preview {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  font-size: 18px;
+  line-height: 1.35;
+  color: #252423;
+  background: #faf9f8;
+  border: 1px dashed #d1d1d1;
+  border-radius: 6px;
+}
+
+.huabi-font-preview--failed {
+  border-color: #e74856;
+  color: #a4262c;
+}
+
 .huabi-toolbar-visible-list {
   display: flex;
   flex-direction: column;

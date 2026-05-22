@@ -4,4 +4,4 @@ Thumbs.db
 dist/
 node_modules/
 package-lock.json
-content/fonts/JasonHandwriting1.ttf
+.cursor/

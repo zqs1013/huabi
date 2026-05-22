@@ -3,6 +3,21 @@
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
   }
 
+  /** 与 content/iconfont/pen.svg、icons.generated.js 一致 */
+  const PEN_PATHS = {
+    body:
+      "M7.99953 31.999L35.9994 4L43.9995 11.999L15.9995 39.999L5.99951 41.999L7.99953 31.999Z",
+    stroke1: "M30.9995 8.99902L38.9995 16.999",
+    stroke2: "M8.99951 31.999L15.9995 38.999",
+    stroke3: "M12.9995 34.999L34.9995 12.999",
+  };
+
+  /** 与 content/iconfont/highlighter.svg、icons.generated.js 一致 */
+  const HIGHLIGHTER_PATHS = {
+    body: "M6 44L6 25H12V17H36V25H42V44H6Z",
+    cap: "M17 17V8L31 4V17",
+  };
+
   /** 画笔模式（荧光笔/形状等）：实心箭头 */
   function brush(color) {
     const fill = color || "#252423";
@@ -13,18 +28,19 @@
     return `${svgUrl(svg)} 5 3, auto`;
   }
 
-  /** 选中画笔 1/2：笔尖朝左上（48px），热点在笔尖 */
+  /** 画笔 1/2：与工具栏 pen 图标一致，笔尖朝左上 */
   function pen(color) {
     const fill = color || "#252423";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24">
-      <g transform="rotate(90 12 12)">
-        <path fill="${fill}" stroke="#000000" stroke-width="1.5" stroke-linejoin="round"
-          d="M4 20l4-1 9-9-3-3-9 9-1 4z"/>
-        <path fill="${fill}" stroke="#000000" stroke-width="1.5" stroke-linejoin="round"
-          d="M14 5l3 3"/>
+    const stroke = "#000000";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+      <g transform="rotate(90 24 24)">
+        <path d="${PEN_PATHS.body}" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${PEN_PATHS.stroke1}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${PEN_PATHS.stroke2}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${PEN_PATHS.stroke3}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>`;
-    return `${svgUrl(svg)} 8 8, auto`;
+    return `${svgUrl(svg)} 6 6, auto`;
   }
 
   /** 选中橡皮擦：圆形白底光标（仅画布指针，不改工具栏图标） */
@@ -39,20 +55,17 @@
     return `${svgUrl(svg)} ${hot} ${hot}, auto`;
   }
 
-  /** 选中荧光笔：笔尖朝左上（48px），热点在笔尖 */
+  /** 荧光笔 1/2：与工具栏 highlighter 图标一致，笔尖朝左 */
   function highlighter(color) {
     const fill = color || "#F1F900";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24">
-      <g transform="rotate(90 12 12)">
-        <path fill="${fill}" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-          d="m9 11-6 6v3h3l6-6"/>
-        <path fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-          d="m18 4 3 3-9 9"/>
-        <path fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round"
-          d="M3 21h5"/>
+    const stroke = "#000000";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+      <g transform="rotate(-90 24 24)">
+        <path d="${HIGHLIGHTER_PATHS.body}" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>
+        <path d="${HIGHLIGHTER_PATHS.cap}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>`;
-    return `${svgUrl(svg)} 6 6, auto`;
+    return `${svgUrl(svg)} 6 24, auto`;
   }
 
   window.HuabiCursors = { brush, pen, eraser, highlighter };

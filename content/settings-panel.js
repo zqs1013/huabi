@@ -52,21 +52,13 @@
       this.overlay.settings = settings;
       if (this.formApi) this.formApi.destroy();
       this.body.innerHTML = "";
-      this.formApi = F.mount(this.body, {
+      this.formApi = await F.mount(this.body, {
         settings,
+        overlay: this.overlay,
         onSave: async (s) => {
           this.overlay.settings = s;
-          this.overlay.engine.toolProfiles = s.toolProfiles;
-          this.overlay.engine.lastPenTool = s.lastPenTool || S.DEFAULT_PEN_TOOL;
-          this.overlay.engine.tableRows = s.tableRows ?? 3;
-          this.overlay.engine.tableCols = s.tableCols ?? 3;
-          this.overlay.engine.coordTicks = s.coordTicks ?? 5;
-          this.overlay.engine.coordStart = s.coordStart ?? 0;
-          this.overlay.engine.coordStep = s.coordStep ?? 1;
-          this.overlay.engine.coordShowY = s.coordShowY === true;
-          this.overlay.engine.textFontSize = s.textFontSize ?? 0;
-          this.overlay.engine.arrowEnds =
-            s.arrowEnds === "both" ? "both" : "end";
+          this.overlay.engine.applySettings(s);
+          await S.applyTextFontToOverlay(this.overlay, s.textFontFamily);
           this.overlay.syncToolbarFromTool();
           this.overlay._updatePenButtonColors();
           this.overlay._rebuildToolbarTools();

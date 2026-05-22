@@ -1,14 +1,17 @@
 {
   "name": "huabi",
-  "version": "1.8.7",
-  "main": "index.js",
+  "version": "1.8.8",
+  "private": true,
+  "description": "晨曦画笔 — 在网页上叠加 Canvas 标注的 Chrome 扩展",
   "scripts": {
-    "icons": "node scripts/generate-icons.js"
+    "icons": "node scripts/generate-icons.js",
+    "icons:toolbar": "node scripts/build-icons.js",
+    "fonts": "node scripts/generate-fonts-manifest.js",
+    "fonts:watch": "node scripts/generate-fonts-manifest.js --watch",
+    "prepare": "node scripts/generate-fonts-manifest.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["chrome-extension", "annotation", "canvas"],
   "license": "ISC",
-  "description": "",
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2"
   }
