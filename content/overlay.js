@@ -1345,7 +1345,7 @@
 
       const stepY = height / ticks;
       const fontSize = Math.max(
-        21,
+        16,
         Math.min(
           (ctx.lineWidth || 2) * 7.5,
           Math.min(stepX, showY ? stepY : stepX) * 0.825,
@@ -1356,11 +1356,12 @@
       ctx.fillStyle = ctx.strokeStyle;
       ctx.font = S.getCanvasFont(fontSize, this.textFontFamily);
 
+      const originLabel = this._formatCoordLabel(coordStart, coordStep);
+      const originPad = Math.max(4, tickLen * 0.6);
+
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       if (showY) {
-        const xOriginLabel = this._formatCoordLabel(coordStart, coordStep);
-        ctx.fillText(xOriginLabel, cx, cy + tickLen + 4);
         for (let i = 0; i <= ticks; i++) {
           const x = left + stepX * i;
           if (Math.abs(x - cx) < 1) continue;
@@ -1382,8 +1383,6 @@
       if (showY) {
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
-        const originLabel = this._formatCoordLabel(coordStart, coordStep);
-        ctx.fillText(originLabel, cx - tickLen - 4, cy);
         for (let i = 0; i <= ticks; i++) {
           const y = top + stepY * i;
           if (Math.abs(y - cy) < 1) continue;
@@ -1392,6 +1391,9 @@
           if (ctx.measureText(label).width > stepY * 0.9) continue;
           ctx.fillText(label, cx - tickLen - 4, y);
         }
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText(originLabel, cx + originPad, cy + tickLen + originPad);
       }
       ctx.restore();
     }
@@ -1868,39 +1870,53 @@
 
       if (toolId === "text") {
         const fields = this._popoverFields();
-        const pagePx = S.getPageDefaultFontSize();
-        const autoPx = S.getDefaultTextFontSize();
         const stored = this.settings.textFontSize ?? 0;
         body.appendChild(
-          this._popoverHint(
-            `颜色跟随${this.engine.lastPenTool === "pen2" ? "画笔 2" : "画笔 1"}；网页默认约 ${pagePx}px，自动字号 ${autoPx}px`,
-            true
-          )
+          this._popoverHint("颜色跟随画笔；默认字号=网页字号+8px", true)
         );
-        fields.appendChild(
-          this._popoverNumberRow(
-            "字号",
-            stored,
-            (v) => {
-              const px = Math.max(0, Math.min(120, v));
-              this.settings.textFontSize = px;
-              this.engine.textFontSize = px;
-              this._persistToolProfiles();
-            },
-            { min: 0, max: 120 }
-          )
+        const fontRow = this._popoverNumberRow(
+          "字号",
+          stored,
+          (v) => {
+            const px = Math.max(0, Math.min(120, v));
+            this.settings.textFontSize = px;
+            this.engine.textFontSize = px;
+            this._persistToolProfiles();
+            updateTextFontSizeLive();
+          },
+          { min: 0, max: 120 }
         );
+        const fontSizeOut = document.createElement("output");
+        fontSizeOut.className = "huabi-text-font-size-out";
+        fontSizeOut.title = "当前文字工具实际字号（0 表示自动：网页字号+8）";
+        const updateTextFontSizeLive = () => {
+          const raw = Number(fontInput.value);
+          const temp = {
+            ...this.settings,
+            textFontSize: Number.isFinite(raw) ? raw : this.settings.textFontSize,
+          };
+          const px = S.resolveTextFontSize(temp, this.engine);
+          fontSizeOut.textContent = `${px}px`;
+        };
+        fontRow.appendChild(fontSizeOut);
+        const fontInput = fontRow.querySelector('input[type="number"]');
+        fontInput.addEventListener("input", updateTextFontSizeLive);
+        updateTextFontSizeLive();
+        fields.appendChild(fontRow);
         body.appendChild(fields);
         body.appendChild(
           this._popoverHint(
             "画笔模式：点击空白新建，单击选中拖动，双击编辑；输入时点击空白遮罩确认。鼠标模式：点网页操作页面，点中文字/形状可选中拖动。Delete/Backspace 删除选中项。升级前旧标注不可点选。"
           )
         );
+        body.appendChild(
+          this._popoverHint("输入确认后自动切换为鼠标模式；再次添加文字请点击文字工具。")
+        );
       }
 
       if (S.isShapeTool(toolId)) {
         body.appendChild(
-          this._popoverHint("绘制完成后自动切换为鼠标模式，便于选中、移动与删除。")
+          this._popoverHint("绘制完成后自动切换为鼠标模式；再次使用请点击该工具。")
         );
       }
 
@@ -1950,10 +1966,19 @@
       input.value = String(value);
       const out = document.createElement("output");
       out.textContent = input.value;
+      const syncRangeFill = () => {
+        const lo = Number(input.min);
+        const hi = Number(input.max);
+        const v = Number(input.value);
+        const pct = hi === lo ? 0 : ((v - lo) / (hi - lo)) * 100;
+        input.style.setProperty("--hb-range-pct", `${pct}%`);
+      };
       input.addEventListener("input", () => {
         out.textContent = input.value;
+        syncRangeFill();
         onChange(Number(input.value));
       });
+      syncRangeFill();
       row.appendChild(span);
       row.appendChild(input);
       row.appendChild(out);
@@ -2524,11 +2549,21 @@
     }
 
     toggleBrushMode() {
+      const enteringBrush = !this.brushMode;
       this.brushMode = !this.brushMode;
       if (!this.brushMode) {
         this.root?.classList.remove("huabi-drawing", "huabi-erasing");
+      } else if (enteringBrush && S.requiresReclickAfterUse(this.engine.tool)) {
+        this.engine.tool = S.DEFAULT_PEN_TOOL;
       }
       this.applyBrushModeUI();
+    }
+
+    _switchToMouseAfterDisposableTool() {
+      this.engine.tool = S.DEFAULT_PEN_TOOL;
+      this.setBrushMode(false);
+      this.root?.classList.remove("huabi-drawing", "huabi-erasing");
+      this.syncToolbarFromTool();
     }
 
     setBrushMode(on) {
@@ -2552,6 +2587,7 @@
       if (commit) {
         if (text.trim()) {
           this._commitTextToCanvas(text, x, y, { editId, fontSize, color, fontFamily });
+          this._switchToMouseAfterDisposableTool();
         } else if (editId) {
           this.engine.pushHistory();
           this.engine.renderTexts();
@@ -2880,8 +2916,8 @@
       const up = (e) => {
         if (!this._canvasPointerActive && !this.engine.isDrawing) return;
         if (e.button !== 0 && e.type === "mouseup") return;
-        if (this.engine.onPointerUp(e)) {
-          this.setBrushMode(false);
+        if (this.engine.onPointerUp(e) && S.isShapeTool(this.engine.tool)) {
+          this._switchToMouseAfterDisposableTool();
         }
         this._canvasPointerActive = false;
         this.root.classList.remove("huabi-drawing", "huabi-erasing");
@@ -3104,15 +3140,6 @@
         }
       }
 
-      if (!this.brushMode) {
-        if (K.matchShortcut(e, shortcuts.eraser)) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.selectTool("eraser");
-        }
-        return;
-      }
-
       for (const id of S.getAllToolIds()) {
         if (K.matchShortcut(e, shortcuts[id])) {
           e.preventDefault();
@@ -3120,6 +3147,10 @@
           this.selectTool(id);
           return;
         }
+      }
+
+      if (!this.brushMode) {
+        return;
       }
 
       if (K.matchShortcut(e, shortcuts.undo)) {

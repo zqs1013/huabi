@@ -181,7 +181,7 @@
     const scHint = el(
       "p",
       "huabi-form-hint",
-      "工具快捷键仅在画笔模式下生效；切换鼠标/画笔在标注会话内始终可用。Ctrl+1～9、Ctrl+T/W 等由浏览器占用，无法用于标注；切换鼠标/画笔建议用空格或 Alt+字母（如 Alt+M）。"
+      "工具快捷键在鼠标/画笔模式下均可切换工具；形状、文字等会自动进入画笔模式。撤销/重做等仅在画笔模式下响应。切换鼠标/画笔在标注会话内始终可用。Ctrl+1～9、Ctrl+T/W 等由浏览器占用，无法用于标注；切换鼠标/画笔建议用空格或 Alt+字母（如 Alt+M）。"
     );
     scSec.appendChild(scHint);
     const scTable = el("table", "huabi-shortcut-table");

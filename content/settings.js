@@ -735,6 +735,21 @@
     return isPenTool(id) || isHighlighterTool(id);
   }
 
+  /** 画笔类：画笔 1/2、荧光笔 */
+  function isPenCategoryTool(id) {
+    return isFreehandTool(id);
+  }
+
+  /** 用完后保持当前工具：画笔、荧光笔、橡皮 */
+  function keepsToolAfterUse(id) {
+    return isPenCategoryTool(id) || isEraserTool(id);
+  }
+
+  /** 用完后切鼠标、需再点工具栏：形状、文字 */
+  function requiresReclickAfterUse(id) {
+    return isShapeTool(id) || isTextTool(id);
+  }
+
   function isEraserTool(id) {
     return id === "eraser";
   }
@@ -785,6 +800,9 @@
     isPenTool,
     isHighlighterTool,
     isShapeTool,
+    isPenCategoryTool,
+    keepsToolAfterUse,
+    requiresReclickAfterUse,
     isFreehandTool,
     isEraserTool,
     isTextTool,
