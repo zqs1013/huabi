@@ -73,6 +73,48 @@
   pointer-events: none;
 }
 
+/* 软件光标：跟随笔尖（手写板在 Chrome 中常不显示 CSS 自定义 cursor） */
+#huabi-cursor-follower {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  background-size: contain;
+  transform: translate(-9999px, -9999px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.05s ease;
+}
+
+#huabi-cursor-follower.huabi-cursor-follower--visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+#huabi-root.huabi-brush-mode.huabi-active .huabi-canvas-wrap,
+#huabi-root.huabi-brush-mode.huabi-active #huabi-main,
+#huabi-root.huabi-brush-mode.huabi-active #huabi-highlight,
+#huabi-root.huabi-brush-mode.huabi-active #huabi-shape,
+#huabi-root.huabi-brush-mode.huabi-active #huabi-text,
+#huabi-root.huabi-brush-mode.huabi-active #huabi-preview {
+  cursor: none !important;
+}
+
+#huabi-root.huabi-brush-mode.huabi-active.huabi-text-tool #huabi-main,
+#huabi-root.huabi-brush-mode.huabi-active.huabi-text-tool #huabi-highlight,
+#huabi-root.huabi-brush-mode.huabi-active.huabi-text-tool #huabi-shape,
+#huabi-root.huabi-brush-mode.huabi-active.huabi-text-tool #huabi-text,
+#huabi-root.huabi-brush-mode.huabi-active.huabi-text-tool #huabi-preview,
+#huabi-root.huabi-brush-mode.huabi-active.huabi-text-tool .huabi-canvas-wrap {
+  cursor: text !important;
+}
+
 #huabi-toolbar {
   pointer-events: auto;
 }

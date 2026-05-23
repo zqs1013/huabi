@@ -18,6 +18,7 @@
 | `npm run fonts:watch` | 监听字体目录自动更新索引 |
 | `npm run icons` | 从 SVG 生成扩展图标 PNG |
 | `npm run icons:toolbar` | 从 `content/iconfont` 生成工具栏内联图标 JS |
+| `npm run pack` | 打包发布 zip 到 `dist/`（**不含**自定义字体文件） |
 
 ## 目录结构
 

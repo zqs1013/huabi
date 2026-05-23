@@ -1439,8 +1439,11 @@
       this.settingsPanel = null;
       this._textEditor = null;
       this._selectedCanvasObject = null;
+      this._cursorFollower = null;
+      this._cursorFollowerHot = { x: 0, y: 0 };
       this._onMessage = this._onMessage.bind(this);
       this._onKeyDown = this._onKeyDown.bind(this);
+      this._brushPointerMove = this._brushPointerMove.bind(this);
     }
 
     async init() {
@@ -1473,6 +1476,7 @@
       root.appendChild(wrap);
       root.appendChild(this._buildToolbar());
       root.appendChild(this._buildToolPopover());
+      this._initCursorFollower(root);
       document.documentElement.appendChild(root);
 
       this.root = root;
@@ -2089,22 +2093,10 @@
       const id = toolId || this.engine.tool;
       const isEraser = id === "eraser";
       const eraserActive = this.brushMode && isEraser;
+      const useSoftwareCursor =
+        this.active && this.brushMode && !S.isTextTool(id);
       this.root.classList.toggle("huabi-tool-eraser", eraserActive);
-
-      let cursor = "default";
-      if (this.active && this.brushMode && C) {
-        if (isEraser) {
-          const er = this.engine.getProfile("eraser");
-          cursor = C.eraser(Math.max(er.lineWidth || 16, 8));
-        } else if (S.isTextTool(id)) {
-          cursor = "text";
-        } else {
-          const color = this._getBrushCursorColor();
-          if (S.isPenTool(id)) cursor = C.pen(color);
-          else if (S.isHighlighterTool(id)) cursor = C.highlighter(color);
-          else cursor = C.brush(color);
-        }
-      }
+      this.root.classList.toggle("huabi-text-tool", this.active && this.brushMode && S.isTextTool(id));
 
       [
         this.canvasWrap,
@@ -2113,17 +2105,23 @@
         this.shapeCanvas,
         this.textCanvas,
         this.previewCanvas,
-      ].forEach(
-        (el) => {
-          if (!el) return;
-          el.classList.toggle("huabi-eraser-active", eraserActive);
-          if (this.active && this.brushMode) {
-            el.style.setProperty("cursor", cursor, "important");
-          } else {
-            el.style.removeProperty("cursor");
-          }
+      ].forEach((el) => {
+        if (!el) return;
+        el.classList.toggle("huabi-eraser-active", eraserActive);
+        if (!this.active || !this.brushMode) {
+          el.style.removeProperty("cursor");
+        } else if (S.isTextTool(id)) {
+          el.style.setProperty("cursor", "text", "important");
+        } else {
+          el.style.removeProperty("cursor");
         }
-      );
+      });
+
+      if (useSoftwareCursor) {
+        this._syncCursorFollowerAppearance(id);
+      } else {
+        this._hideCursorFollower();
+      }
     }
 
     _clearCanvasSelection() {
@@ -2453,8 +2451,76 @@
           ? "画笔模式（点击切换为鼠标）"
           : "鼠标模式：点网页操作页面，点中标注可选中移动（点击切换为画笔）";
       }
+      if (!this.active || !this.brushMode) this._hideCursorFollower();
       if (this._selectedCanvasObject) this._renderCanvasSelection();
       this.syncToolbarFromTool();
+    }
+
+    _initCursorFollower(root) {
+      const el = document.createElement("div");
+      el.id = "huabi-cursor-follower";
+      el.setAttribute("aria-hidden", "true");
+      root.appendChild(el);
+      this._cursorFollower = el;
+    }
+
+    _syncCursorFollowerAppearance(toolId) {
+      const el = this._cursorFollower;
+      if (!el || !C?.getFollowerMeta) return;
+      const id = toolId || this.engine.tool;
+      let kind = "brush";
+      if (id === "eraser") kind = "eraser";
+      else if (S.isPenTool(id)) kind = "pen";
+      else if (S.isHighlighterTool(id)) kind = "highlighter";
+      const meta = C.getFollowerMeta(kind, {
+        color: this._getBrushCursorColor(),
+        eraserSize: Math.max(this.engine.getProfile("eraser").lineWidth || 16, 8),
+      });
+      this._cursorFollowerHot = { x: meta.hotX, y: meta.hotY };
+      el.style.width = `${meta.width}px`;
+      el.style.height = `${meta.height}px`;
+      el.style.backgroundImage = C.dataUrlFromSvg(meta.svg);
+    }
+
+    _showCursorFollower(clientX, clientY) {
+      const el = this._cursorFollower;
+      if (!el) return;
+      const hx = this._cursorFollowerHot.x;
+      const hy = this._cursorFollowerHot.y;
+      el.style.transform = `translate(${Math.round(clientX - hx)}px, ${Math.round(
+        clientY - hy
+      )}px)`;
+      el.classList.add("huabi-cursor-follower--visible");
+    }
+
+    _hideCursorFollower() {
+      this._cursorFollower?.classList.remove("huabi-cursor-follower--visible");
+    }
+
+    _brushPointerMove(e) {
+      if (!this.active || !this.brushMode) return;
+      if (this._textEditor || this.settingsPanel?.visible) return;
+      if (this.root?.classList.contains("huabi-text-tool")) return;
+      if (!this.canvasWrap || !this._cursorFollower) return;
+      const skip = (target) =>
+        target?.closest?.(
+          "#huabi-toolbar, #huabi-tool-popover, #huabi-settings-backdrop, #huabi-settings-panel, .huabi-text-editing-layer, .huabi-text-editor-wrap"
+        );
+      if (skip(e.target)) {
+        this._hideCursorFollower();
+        return;
+      }
+      const r = this.canvasWrap.getBoundingClientRect();
+      if (
+        e.clientX < r.left ||
+        e.clientX > r.right ||
+        e.clientY < r.top ||
+        e.clientY > r.bottom
+      ) {
+        this._hideCursorFollower();
+        return;
+      }
+      this._showCursorFollower(e.clientX, e.clientY);
     }
 
     toggleBrushMode() {
@@ -2806,6 +2872,7 @@
 
       const move = (e) => {
         if (!this.engine.isDrawing) return;
+        this._brushPointerMove(e);
         this.engine.onPointerMove(e);
         e.preventDefault();
       };
@@ -2833,6 +2900,7 @@
 
       wrap.addEventListener("pointerdown", bindDown, true);
       document.addEventListener("pointerdown", mouseModeDown, true);
+      document.addEventListener("pointermove", this._brushPointerMove, true);
 
       const onCanvasDblClick = (e) => {
         if (!this._canCanvasInteract()) return;

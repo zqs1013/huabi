@@ -257,11 +257,36 @@
   gap: 6px;
 }
 
-.huabi-toolbar-visible-item {
-  display: flex;
-  align-items: center;
+/* 提高优先级并复位 checkbox，避免宿主页面全局样式隐藏或拆行 */
+#huabi-settings-panel .huabi-toolbar-visible-item {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
   gap: 8px;
   font-size: 13px;
+  cursor: pointer;
+  margin: 0;
+}
+
+#huabi-settings-panel .huabi-toolbar-visible-item input[type="checkbox"] {
+  -webkit-appearance: checkbox !important;
+  appearance: auto !important;
+  display: inline-block !important;
+  box-sizing: border-box !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  position: static !important;
+  flex-shrink: 0 !important;
+  clip: auto !important;
+  clip-path: none !important;
+  pointer-events: auto !important;
+  accent-color: #0078d4;
   cursor: pointer;
 }
 

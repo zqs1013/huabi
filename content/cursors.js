@@ -3,6 +3,10 @@
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
   }
 
+  function cssFromMeta(meta) {
+    return `${svgUrl(meta.svg)} ${meta.hotX} ${meta.hotY}, auto`;
+  }
+
   /** 与 content/iconfont/pen.svg、icons.generated.js 一致 */
   const PEN_PATHS = {
     body:
@@ -18,18 +22,7 @@
     cap: "M17 17V8L31 4V17",
   };
 
-  /** 画笔模式（荧光笔/形状等）：实心箭头 */
-  function brush(color) {
-    const fill = color || "#252423";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-      <path fill="${fill}" stroke="#ffffff" stroke-width="1.25" stroke-linejoin="round"
-        d="M5 3 L5 17.5 L9.5 13 L12.5 20.5 L14.5 19 L11.5 11.5 L18 11.5 Z"/>
-    </svg>`;
-    return `${svgUrl(svg)} 5 3, auto`;
-  }
-
-  /** 画笔 1/2：与工具栏 pen 图标一致，笔尖朝左上 */
-  function pen(color) {
+  function penMeta(color) {
     const fill = color || "#252423";
     const stroke = "#000000";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
@@ -40,23 +33,10 @@
         <path d="${PEN_PATHS.stroke3}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>`;
-    return `${svgUrl(svg)} 6 6, auto`;
+    return { svg, width: 48, height: 48, hotX: 6, hotY: 6 };
   }
 
-  /** 选中橡皮擦：圆形白底光标（仅画布指针，不改工具栏图标） */
-  function eraser(diameter) {
-    const size = Math.min(Math.max(Math.round(diameter), 16), 48);
-    const c = size / 2;
-    const r = Math.max(c - 2, 6);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-      <circle cx="${c}" cy="${c}" r="${r}" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
-    </svg>`;
-    const hot = Math.round(c);
-    return `${svgUrl(svg)} ${hot} ${hot}, auto`;
-  }
-
-  /** 荧光笔 1/2：与工具栏 highlighter 图标一致，笔尖朝左 */
-  function highlighter(color) {
+  function highlighterMeta(color) {
     const fill = color || "#F1F900";
     const stroke = "#000000";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
@@ -65,8 +45,67 @@
         <path d="${HIGHLIGHTER_PATHS.cap}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </g>
     </svg>`;
-    return `${svgUrl(svg)} 6 24, auto`;
+    return { svg, width: 48, height: 48, hotX: 6, hotY: 24 };
   }
 
-  window.HuabiCursors = { brush, pen, eraser, highlighter };
+  function brushMeta(color) {
+    const fill = color || "#252423";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+      <path fill="${fill}" stroke="#ffffff" stroke-width="1.25" stroke-linejoin="round"
+        d="M5 3 L5 17.5 L9.5 13 L12.5 20.5 L14.5 19 L11.5 11.5 L18 11.5 Z"/>
+    </svg>`;
+    return { svg, width: 24, height: 24, hotX: 5, hotY: 3 };
+  }
+
+  function eraserMeta(diameter) {
+    const size = Math.min(Math.max(Math.round(diameter), 16), 64);
+    const c = size / 2;
+    const r = Math.max(c - 2, 6);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <circle cx="${c}" cy="${c}" r="${r}" fill="#ffffff" stroke="#000000" stroke-width="1.5"/>
+    </svg>`;
+    const hot = Math.round(c);
+    return { svg, width: size, height: size, hotX: hot, hotY: hot };
+  }
+
+  function pen(color) {
+    return cssFromMeta(penMeta(color));
+  }
+
+  function eraser(diameter) {
+    return cssFromMeta(eraserMeta(diameter));
+  }
+
+  function highlighter(color) {
+    return cssFromMeta(highlighterMeta(color));
+  }
+
+  function brush(color) {
+    return cssFromMeta(brushMeta(color));
+  }
+
+  /**
+   * 软件光标层用（手写板/触控笔在 Chrome 中常不显示 CSS cursor）
+   * @param {"pen"|"highlighter"|"brush"|"eraser"} kind
+   */
+  function getFollowerMeta(kind, options = {}) {
+    const color = options.color;
+    if (kind === "eraser") return eraserMeta(options.eraserSize ?? 16);
+    if (kind === "pen") return penMeta(color);
+    if (kind === "highlighter") return highlighterMeta(color);
+    return brushMeta(color);
+  }
+
+  function dataUrlFromSvg(svg) {
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  }
+
+  window.HuabiCursors = {
+    brush,
+    pen,
+    eraser,
+    highlighter,
+    getFollowerMeta,
+    dataUrlFromSvg,
+  };
 })();
