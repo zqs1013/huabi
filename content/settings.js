@@ -30,6 +30,12 @@
       savedColors: ["#00F900", "#33FF33", "#00CC00"],
     },
     eraser: { lineWidth: 16 },
+    rect: {
+      rectMode: "stroke",
+      color: "#E74856",
+      fillAlpha: 0.5,
+      savedColors: ["#E74856", "#936757", "#252423"],
+    },
   };
 
   const COLOR_TOOL_LABELS = {
@@ -485,6 +491,20 @@
       }
       if (p.lineWidth == null) p.lineWidth = def.lineWidth;
     }
+    const rectDef = DEFAULT_TOOL_PROFILES.rect;
+    const rectP = out.rect || (out.rect = {});
+    if (rectP.rectMode !== "stroke" && rectP.rectMode !== "fill") {
+      rectP.rectMode = rectDef.rectMode;
+    }
+    if (!Array.isArray(rectP.savedColors) || rectP.savedColors.length !== 3) {
+      const fallback = rectDef.savedColors || [rectDef.color, rectDef.color, rectDef.color];
+      rectP.savedColors =
+        Array.isArray(rectP.savedColors) && rectP.savedColors.length
+          ? [...rectP.savedColors.slice(0, 3), ...fallback].slice(0, 3)
+          : [...fallback];
+    }
+    if (!rectP.color) rectP.color = rectP.savedColors[0];
+    if (rectP.fillAlpha == null) rectP.fillAlpha = rectDef.fillAlpha;
     return out;
   }
 
@@ -516,6 +536,7 @@
       coordStart: 0,
       coordStep: 1,
       coordShowY: false,
+      coordMode: "xOnly",
       textFontSize: 0,
       textFontFamily: DEFAULT_TEXT_FONT_FAMILY,
       toolbarPosition: null,
@@ -536,6 +557,18 @@
     return out;
   }
 
+  const COORD_MODES = ["xOnly", "cross", "firstQuadrant"];
+
+  function normalizeCoordMode(raw) {
+    const mode = raw?.coordMode;
+    if (COORD_MODES.includes(mode)) return mode;
+    return raw?.coordShowY === true ? "cross" : "xOnly";
+  }
+
+  function coordModeNeedsHeight(mode) {
+    return mode === "cross" || mode === "firstQuadrant";
+  }
+
   function normalizeLoadedSettings(raw) {
     const settings = {
       ...getDefaultSettings(),
@@ -549,7 +582,7 @@
       tableRows: raw?.tableRows ?? 3,
       tableCols: raw?.tableCols ?? 3,
       coordTicks: raw?.coordTicks ?? 5,
-      coordShowY: raw?.coordShowY === true,
+      coordMode: normalizeCoordMode(raw),
       textFontSize: raw?.textFontSize ?? 0,
       textFontFamily: normalizeTextFontFamily(raw?.textFontFamily),
     };
@@ -578,6 +611,7 @@
     const step = Number(raw?.coordStep);
     settings.coordStep =
       Number.isFinite(step) && step > 0 && step <= 10000 ? step : def.coordStep;
+    settings.coordShowY = settings.coordMode === "cross";
     return settings;
   }
 
@@ -827,6 +861,9 @@
     getPageDefaultFontSize,
     getDefaultTextFontSize,
     resolveTextFontSize,
+    COORD_MODES,
+    normalizeCoordMode,
+    coordModeNeedsHeight,
     ensureTextFont,
     ensureTextFonts,
     applyTextFontToOverlay,

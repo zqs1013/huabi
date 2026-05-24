@@ -339,6 +339,50 @@
   min-width: 0;
 }
 
+.huabi-popover-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.huabi-popover-swatch-wrap {
+  position: relative;
+  width: 28px;
+  height: 28px;
+}
+
+.huabi-popover-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.huabi-popover-swatch-edit {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid #fff;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px #c8c6c4;
+  cursor: pointer;
+}
+
+.huabi-popover-row input[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
 #huabi-tool-popover .huabi-popover-check input[type="checkbox"] {
   -webkit-appearance: checkbox !important;
   appearance: auto !important;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "晨曦画笔",
-  "version": "1.8.10",
+  "version": "1.9.0",
   "description": "在网页上自由标注：画笔、直线、矩形、表格、荧光笔、文字等",
   "permissions": ["storage", "activeTab"],
   "action": {

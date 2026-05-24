@@ -1,6 +1,6 @@
 {
   "name": "huabi",
-  "version": "1.8.10",
+  "version": "1.9.0",
   "private": true,
   "description": "晨曦画笔 — 在网页上叠加 Canvas 标注的 Chrome 扩展",
   "scripts": {

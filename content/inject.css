@@ -186,3 +186,11 @@
 #huabi-root.huabi-text-dragging #huabi-preview {
   cursor: move !important;
 }
+
+#huabi-root.huabi-object-resizing .huabi-canvas-wrap,
+#huabi-root.huabi-object-resizing #huabi-main,
+#huabi-root.huabi-object-resizing #huabi-shape,
+#huabi-root.huabi-object-resizing #huabi-text,
+#huabi-root.huabi-object-resizing #huabi-preview {
+  cursor: var(--huabi-resize-cursor, nwse-resize) !important;
+}

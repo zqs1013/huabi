@@ -36,6 +36,34 @@
     return { svg, width: 48, height: 48, hotX: 6, hotY: 6 };
   }
 
+  function parseHexRgb(hex) {
+    const h = (hex || "#F1F900").replace("#", "");
+    const full =
+      h.length === 3
+        ? h
+            .split("")
+            .map((c) => c + c)
+            .join("")
+        : h;
+    const n = parseInt(full, 16) || 0;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  /** 荧光笔跟随光标：圆点，颜色与透明度对齐当前笔划设置 */
+  function highlighterDotMeta(color, alpha, lineWidth) {
+    const diameter = Math.min(Math.max(Math.round(lineWidth || 12), 10), 64);
+    const c = diameter / 2;
+    const r = Math.max(c - 1, 4);
+    const [R, G, B] = parseHexRgb(color);
+    const a = Math.min(Math.max(Number(alpha ?? 0.4), 0), 1);
+    const fill = `rgba(${R},${G},${B},${a})`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${diameter}" height="${diameter}" viewBox="0 0 ${diameter} ${diameter}">
+      <circle cx="${c}" cy="${c}" r="${r}" fill="${fill}" stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
+    </svg>`;
+    const hot = Math.round(c);
+    return { svg, width: diameter, height: diameter, hotX: hot, hotY: hot };
+  }
+
   function highlighterMeta(color) {
     const fill = color || "#F1F900";
     const stroke = "#000000";
@@ -76,8 +104,8 @@
     return cssFromMeta(eraserMeta(diameter));
   }
 
-  function highlighter(color) {
-    return cssFromMeta(highlighterMeta(color));
+  function highlighter(color, alpha, lineWidth) {
+    return cssFromMeta(highlighterDotMeta(color, alpha, lineWidth));
   }
 
   function brush(color) {
@@ -92,7 +120,13 @@
     const color = options.color;
     if (kind === "eraser") return eraserMeta(options.eraserSize ?? 16);
     if (kind === "pen") return penMeta(color);
-    if (kind === "highlighter") return highlighterMeta(color);
+    if (kind === "highlighter") {
+      return highlighterDotMeta(
+        color,
+        options.highlightAlpha,
+        options.lineWidth
+      );
+    }
     return brushMeta(color);
   }
 

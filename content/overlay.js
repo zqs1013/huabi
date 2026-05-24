@@ -9,6 +9,16 @@
 
   const MAX_HISTORY = 25;
 
+  const RESIZABLE_SHAPE_TYPES = new Set([
+    "line",
+    "rect",
+    "circle",
+    "table",
+    "arrowLine",
+  ]);
+  const RESIZE_HANDLE_HIT = 9;
+  const RESIZE_HANDLE_DRAW = 5;
+
   class DrawingEngine {
     constructor(mainCanvas, highlightCanvas, shapeCanvas, textCanvas, previewCanvas, settings) {
       this.mainCanvas = mainCanvas;
@@ -38,7 +48,8 @@
       this.coordTicks = settings.coordTicks ?? 5;
       this.coordStart = settings.coordStart ?? 0;
       this.coordStep = settings.coordStep ?? 1;
-      this.coordShowY = settings.coordShowY === true;
+      this.coordMode = S.normalizeCoordMode(settings);
+      this.coordShowY = this.coordMode === "cross";
       this.textFontSize = settings.textFontSize ?? 0;
       this.textFontFamily = S.normalizeTextFontFamily(settings.textFontFamily);
       this.arrowEnds = settings.arrowEnds === "both" ? "both" : "end";
@@ -64,7 +75,8 @@
       this.coordTicks = settings.coordTicks ?? 5;
       this.coordStart = settings.coordStart ?? 0;
       this.coordStep = settings.coordStep ?? 1;
-      this.coordShowY = settings.coordShowY === true;
+      this.coordMode = S.normalizeCoordMode(settings);
+      this.coordShowY = this.coordMode === "cross";
       this.textFontSize = settings.textFontSize ?? 0;
       this.textFontFamily = S.normalizeTextFontFamily(settings.textFontFamily);
       this.arrowEnds = settings.arrowEnds === "both" ? "both" : "end";
@@ -90,6 +102,14 @@
     }
 
     getActiveStyle() {
+      if (this.tool === "rect" && this.getProfile("rect").rectMode === "fill") {
+        const rp = this.getProfile("rect");
+        return {
+          color: rp.color,
+          fillAlpha: rp.fillAlpha ?? 0.5,
+          lineWidth: 0,
+        };
+      }
       const target =
         S.isShapeTool(this.tool) || S.isTextTool(this.tool)
           ? this.lastPenTool
@@ -324,21 +344,70 @@
       return this._hitNearAnySegment(x, y, segments, thresh);
     }
 
+    resolveCoordMode(opts = {}) {
+      if (opts.coordMode && S.COORD_MODES.includes(opts.coordMode)) {
+        return opts.coordMode;
+      }
+      if (opts.coordShowY != null) {
+        return opts.coordShowY ? "cross" : "xOnly";
+      }
+      return this.coordMode || "xOnly";
+    }
+
+    _readCoordDrawParams(ctx, opts = {}) {
+      const ticks = Math.max(1, Math.min(20, opts.coordTicks ?? this.coordTicks));
+      let coordStart =
+        opts.coordStart != null ? Number(opts.coordStart) : this.coordStart;
+      let coordStep = opts.coordStep != null ? Number(opts.coordStep) : this.coordStep;
+      if (!Number.isFinite(coordStart)) coordStart = 0;
+      if (!Number.isFinite(coordStep) || coordStep <= 0) coordStep = 1;
+      const tickLen = Math.max(4, Math.min(10, (ctx.lineWidth || 2) * 2));
+      const arrow = Math.max(6, tickLen + 2);
+      return { ticks, coordStart, coordStep, tickLen, arrow };
+    }
+
     _hitAxesStroke(x, y, item, thresh) {
       const { x1, y1, x2, y2 } = item;
       const left = Math.min(x1, x2);
       const top = Math.min(y1, y2);
       const width = Math.abs(x2 - x1);
       const height = Math.abs(y2 - y1);
-      const showY = item.coordShowY != null ? !!item.coordShowY : !!this.coordShowY;
-      if (width < 8 || (showY && height < 8)) return false;
+      const mode = this.resolveCoordMode(item);
+      if (width < 8 || (S.coordModeNeedsHeight(mode) && height < 8)) return false;
 
-      const cx = left + width / 2;
-      const cy = top + height / 2;
       const ticks = Math.max(1, Math.min(20, item.coordTicks ?? this.coordTicks));
       const tickLen = Math.max(4, Math.min(10, (item.lineWidth || 2) * 2));
       const arrow = Math.max(6, tickLen + 2);
-      const segments = [[left, cy, left + width, cy]];
+      const segments = [];
+
+      if (mode === "firstQuadrant") {
+        const ox = left;
+        const oy = top + height;
+        segments.push([ox, oy, left + width, oy], [ox, oy, ox, top]);
+        const stepX = width / ticks;
+        const stepY = height / ticks;
+        for (let i = 1; i < ticks; i++) {
+          const sx = left + stepX * i;
+          segments.push([sx, oy - tickLen, sx, oy + tickLen]);
+        }
+        for (let i = 1; i < ticks; i++) {
+          const sy = oy - stepY * i;
+          segments.push([ox - tickLen, sy, ox + tickLen, sy]);
+        }
+        const right = left + width;
+        segments.push(
+          [right, oy, right - arrow, oy - arrow * 0.45],
+          [right, oy, right - arrow, oy + arrow * 0.45],
+          [ox, top, ox - arrow * 0.45, top + arrow],
+          [ox, top, ox + arrow * 0.45, top + arrow]
+        );
+        return this._hitNearAnySegment(x, y, segments, thresh);
+      }
+
+      const showY = mode === "cross";
+      const cx = left + width / 2;
+      const cy = top + height / 2;
+      segments.push([left, cy, left + width, cy]);
 
       if (showY) {
         segments.push([cx, top, cx, top + height]);
@@ -415,6 +484,11 @@
         return this._hitArrowLineStroke(x, y, item, thresh);
       }
       if (item.type === "rect") {
+        if (item.filled) {
+          return (
+            x >= left && x <= left + width && y >= top && y <= top + height
+          );
+        }
         return this._hitRectStroke(x, y, item.x1, item.y1, item.x2, item.y2, thresh);
       }
       if (item.type === "circle") {
@@ -459,7 +533,10 @@
         coordStart: item.coordStart,
         coordStep: item.coordStep,
         coordShowY: item.coordShowY,
+        coordMode: item.coordMode,
         arrowEnds: item.arrowEnds,
+        filled: item.filled,
+        fillAlpha: item.fillAlpha,
       });
     }
 
@@ -484,7 +561,15 @@
         ctx.lineTo(item.x2, item.y2);
         ctx.stroke();
       } else if (item.type === "rect") {
-        ctx.strokeRect(item.x1, item.y1, item.x2 - item.x1, item.y2 - item.y1);
+        if (item.filled) {
+          const { left, top, width, height } = this._shapeBounds(item);
+          ctx.save();
+          ctx.fillStyle = this._hexToRgba(item.color, item.fillAlpha ?? 0.5);
+          ctx.fillRect(left, top, width, height);
+          ctx.restore();
+        } else {
+          ctx.strokeRect(item.x1, item.y1, item.x2 - item.x1, item.y2 - item.y1);
+        }
       } else if (item.type === "table") {
         ctx.strokeRect(item.x1, item.y1, item.x2 - item.x1, item.y2 - item.y1);
         this._drawTableGrid(ctx, item.x1, item.y1, item.x2, item.y2, {
@@ -496,6 +581,7 @@
           coordTicks: item.coordTicks,
           coordStart: item.coordStart ?? 0,
           coordStep: item.coordStep ?? 1,
+          coordMode: item.coordMode,
           coordShowY: item.coordShowY,
         });
       } else if (item.type === "arrowLine") {
@@ -536,8 +622,9 @@
       } else if (tool === "table") {
         if (width < 4 || height < 4) return false;
       } else if (tool === "axes") {
-        const showY = !!this.coordShowY;
-        if (width < 8 || (showY && height < 8)) return false;
+        if (width < 8 || (S.coordModeNeedsHeight(this.coordMode) && height < 8)) {
+          return false;
+        }
       }
 
       const style = this.getActiveStyle();
@@ -557,9 +644,13 @@
         item.coordTicks = this.coordTicks;
         item.coordStart = this.coordStart;
         item.coordStep = this.coordStep;
-        item.coordShowY = this.coordShowY;
+        item.coordMode = this.coordMode;
+        item.coordShowY = this.coordMode === "cross";
       } else if (tool === "arrowLine") {
         item.arrowEnds = this.arrowEnds;
+      } else if (tool === "rect" && this.getProfile("rect").rectMode === "fill") {
+        item.filled = true;
+        item.fillAlpha = style.fillAlpha ?? 0.5;
       }
       this.pushHistory();
       this.addShapeItem(item);
@@ -1161,7 +1252,13 @@
         ctx.lineTo(x, y);
         ctx.stroke();
       } else if (tool === "rect") {
-        ctx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
+        if (this.getProfile("rect").rectMode === "fill") {
+          const style = this.getActiveStyle();
+          ctx.fillStyle = this._hexToRgba(style.color, style.fillAlpha ?? 0.5);
+          ctx.fillRect(this.startX, this.startY, x - this.startX, y - this.startY);
+        } else {
+          ctx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
+        }
       } else if (tool === "table") {
         ctx.strokeRect(this.startX, this.startY, x - this.startX, y - this.startY);
         this._drawTableGrid(ctx, this.startX, this.startY, x, y);
@@ -1170,7 +1267,7 @@
           coordTicks: this.coordTicks,
           coordStart: this.coordStart,
           coordStep: this.coordStep,
-          coordShowY: this.coordShowY,
+          coordMode: this.coordMode,
         });
       } else if (tool === "arrowLine") {
         this._drawArrowLine(
@@ -1286,23 +1383,111 @@
       return value.toFixed(decimals);
     }
 
+    _drawAxesFirstQuadrant(ctx, left, top, width, height, opts = {}) {
+      if (width < 8 || height < 8) return;
+
+      const ox = left;
+      const oy = top + height;
+      const { ticks, coordStart, coordStep, tickLen, arrow } = this._readCoordDrawParams(
+        ctx,
+        opts
+      );
+      const stepX = width / ticks;
+      const stepY = height / ticks;
+
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(left + width, oy);
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(ox, top);
+      ctx.stroke();
+
+      ctx.beginPath();
+      for (let i = 1; i < ticks; i++) {
+        const x = left + stepX * i;
+        ctx.moveTo(x, oy - tickLen);
+        ctx.lineTo(x, oy + tickLen);
+      }
+      for (let i = 1; i < ticks; i++) {
+        const y = oy - stepY * i;
+        ctx.moveTo(ox - tickLen, y);
+        ctx.lineTo(ox + tickLen, y);
+      }
+      ctx.stroke();
+
+      const right = left + width;
+      ctx.beginPath();
+      ctx.moveTo(right, oy);
+      ctx.lineTo(right - arrow, oy - arrow * 0.45);
+      ctx.moveTo(right, oy);
+      ctx.lineTo(right - arrow, oy + arrow * 0.45);
+      ctx.moveTo(ox, top);
+      ctx.lineTo(ox - arrow * 0.45, top + arrow);
+      ctx.moveTo(ox, top);
+      ctx.lineTo(ox + arrow * 0.45, top + arrow);
+      ctx.stroke();
+
+      const fontSize = Math.max(
+        16,
+        Math.min(
+          (ctx.lineWidth || 2) * 7.5,
+          Math.min(stepX, stepY) * 0.825,
+          30
+        )
+      );
+      ctx.save();
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = S.getCanvasFont(fontSize, this.textFontFamily);
+
+      const originLabel = this._formatCoordLabel(coordStart, coordStep);
+
+      ctx.textAlign = "right";
+      ctx.textBaseline = "top";
+      ctx.fillText(originLabel, ox - tickLen - 4, oy + tickLen + 4);
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      for (let i = 1; i <= ticks; i++) {
+        const x = left + stepX * i;
+        const value = coordStart + i * coordStep;
+        const label = this._formatCoordLabel(value, coordStep);
+        if (ctx.measureText(label).width > stepX * 0.9) continue;
+        ctx.fillText(label, x, oy + tickLen + 4);
+      }
+
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (let i = 1; i <= ticks; i++) {
+        const y = oy - stepY * i;
+        const value = coordStart + i * coordStep;
+        const label = this._formatCoordLabel(value, coordStep);
+        if (ctx.measureText(label).width > stepY * 0.9) continue;
+        ctx.fillText(label, ox - tickLen - 4, y);
+      }
+
+      ctx.restore();
+    }
+
     _drawAxes(ctx, x1, y1, x2, y2, opts = {}) {
       const left = Math.min(x1, x2);
       const top = Math.min(y1, y2);
       const width = Math.abs(x2 - x1);
       const height = Math.abs(y2 - y1);
-      const showY = opts.coordShowY != null ? !!opts.coordShowY : !!this.coordShowY;
+      const mode = this.resolveCoordMode(opts);
+      if (mode === "firstQuadrant") {
+        this._drawAxesFirstQuadrant(ctx, left, top, width, height, opts);
+        return;
+      }
+
+      const showY = mode === "cross";
       if (width < 8 || (showY && height < 8)) return;
 
       const cx = left + width / 2;
       const cy = top + height / 2;
-      const ticks = Math.max(1, Math.min(20, opts.coordTicks ?? this.coordTicks));
-      const tickLen = Math.max(4, Math.min(10, (ctx.lineWidth || 2) * 2));
-      const arrow = Math.max(6, tickLen + 2);
-      let coordStart = opts.coordStart != null ? Number(opts.coordStart) : this.coordStart;
-      let coordStep = opts.coordStep != null ? Number(opts.coordStep) : this.coordStep;
-      if (!Number.isFinite(coordStart)) coordStart = 0;
-      if (!Number.isFinite(coordStep) || coordStep <= 0) coordStep = 1;
+      const { ticks, coordStart, coordStep, tickLen, arrow } = this._readCoordDrawParams(
+        ctx,
+        opts
+      );
 
       ctx.beginPath();
       ctx.moveTo(left, cy);
@@ -1398,6 +1583,75 @@
       ctx.restore();
     }
 
+    _getAlternatePenColor() {
+      const current = this.lastPenTool || S.DEFAULT_PEN_TOOL;
+      const other = S.isPenTool(current)
+        ? current === "pen1"
+          ? "pen2"
+          : "pen1"
+        : "pen2";
+      return this.getProfile(other).color || "#252423";
+    }
+
+    /** 与坐标系刻度相同策略：随单元格与线宽缩放，限制在 16–30px */
+    _tableLabelFontSize(colStep, rowStep, lineWidth) {
+      const cell = Math.min(colStep, rowStep);
+      return Math.max(
+        16,
+        Math.min((lineWidth || 2) * 7.5, cell * 0.825, 30)
+      );
+    }
+
+    _drawTableLabels(ctx, left, top, width, height, rows, cols, opts = {}) {
+      const colStep = width / cols;
+      const rowStep = height / rows;
+      const fontSize =
+        opts.fontSize ??
+        this._tableLabelFontSize(colStep, rowStep, opts.lineWidth ?? ctx.lineWidth);
+      const labelColor = opts.labelColor ?? this._getAlternatePenColor();
+      const pad = Math.max(4, fontSize * 0.35);
+      const bottomY = top + height + pad;
+
+      ctx.save();
+      ctx.fillStyle = labelColor;
+      ctx.font = S.getCanvasFont(fontSize, this.textFontFamily);
+
+      if (rows === 1) {
+        if (cols > 1) {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          for (let c = 0; c < cols; c++) {
+            const cx = left + colStep * (c + 0.5);
+            ctx.fillText(String(c), cx, bottomY);
+          }
+        } else {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillText("0", left + width / 2, bottomY);
+        }
+      } else {
+        if (cols > 1) {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          for (let c = 0; c < cols; c++) {
+            const cx = left + colStep * (c + 0.5);
+            ctx.fillText(String(c), cx, top - pad);
+          }
+        }
+
+        const maxRowLabel = String(rows - 1);
+        const rowPad = Math.max(pad, ctx.measureText(maxRowLabel).width + 4);
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        for (let r = 0; r < rows; r++) {
+          const cy = top + rowStep * (r + 0.5);
+          ctx.fillText(String(r), left - rowPad, cy);
+        }
+      }
+
+      ctx.restore();
+    }
+
     _drawTableGrid(ctx, x1, y1, x2, y2, opts = {}) {
       const left = Math.min(x1, x2);
       const top = Math.min(y1, y2);
@@ -1422,6 +1676,10 @@
         ctx.lineTo(left + width, y);
       }
       ctx.stroke();
+      this._drawTableLabels(ctx, left, top, width, height, rows, cols, {
+        ...opts,
+        lineWidth: ctx.lineWidth,
+      });
     }
   }
 
@@ -1441,6 +1699,7 @@
       this.settingsPanel = null;
       this._textEditor = null;
       this._selectedCanvasObject = null;
+      this._objectResizeCursor = null;
       this._cursorFollower = null;
       this._cursorFollowerHot = { x: 0, y: 0 };
       this._onMessage = this._onMessage.bind(this);
@@ -1619,6 +1878,129 @@
           btn.style.setProperty("--tool-color", this.engine.getProfile(id).color);
         }
       });
+      this._updateRectButtonColor();
+    }
+
+    _updateRectButtonColor() {
+      const btn = this.toolbar?.querySelector('[data-tool="rect"]');
+      if (!btn) return;
+      const rp = this.engine.getProfile("rect");
+      if (rp.rectMode === "fill") {
+        btn.style.setProperty("--tool-color", rp.color || "#E74856");
+      } else {
+        btn.style.removeProperty("--tool-color");
+      }
+    }
+
+    _appendRectPopoverBody(body, anchor) {
+      const rectProfile = this.engine.getProfile("rect");
+      const rectMode = rectProfile.rectMode === "fill" ? "fill" : "stroke";
+      const saved = [
+        ...(rectProfile.savedColors || ["#E74856", "#936757", "#252423"]),
+      ];
+
+      const modeRow = document.createElement("label");
+      modeRow.className = "huabi-popover-row";
+      const modeSpan = document.createElement("span");
+      modeSpan.textContent = "模式";
+      const modeSel = document.createElement("select");
+      modeSel.innerHTML =
+        '<option value="stroke">描边</option><option value="fill">实心</option>';
+      modeSel.value = rectMode;
+      modeSel.addEventListener("change", () => {
+        const next = modeSel.value === "fill" ? "fill" : "stroke";
+        this.engine.setProfile("rect", { rectMode: next });
+        this._persistToolProfiles();
+        this._updateRectButtonColor();
+        this._openToolPopover("rect", anchor);
+      });
+      modeRow.appendChild(modeSpan);
+      modeRow.appendChild(modeSel);
+      body.appendChild(modeRow);
+
+      if (rectMode === "stroke") {
+        body.appendChild(
+          this._popoverHint(
+            `线宽跟随${this.engine.lastPenTool === "pen2" ? "画笔 2" : "画笔 1"}`,
+            true
+          )
+        );
+        const penId = this.engine.lastPenTool || S.DEFAULT_PEN_TOOL;
+        const penProfile = this.engine.getProfile(penId);
+        const fields = this._popoverFields();
+        fields.appendChild(
+          this._popoverRangeRow("线宽", 1, 24, penProfile.lineWidth || 3, (v) => {
+            this.engine.setProfile(penId, { lineWidth: v });
+            this._persistToolProfiles();
+          })
+        );
+        body.appendChild(fields);
+        return;
+      }
+
+      body.appendChild(
+        this._popoverHint("点击下方色块选用；右下角小方块可编辑保存色", true)
+      );
+
+      const colorInp = document.createElement("input");
+      colorInp.type = "color";
+      colorInp.value = rectProfile.color || saved[0];
+      colorInp.addEventListener("input", () => {
+        this.engine.setProfile("rect", { color: colorInp.value });
+        this._persistToolProfiles();
+        this._updateRectButtonColor();
+      });
+
+      const swatchRow = document.createElement("div");
+      swatchRow.className = "huabi-popover-colors";
+      saved.forEach((c, i) => {
+        const wrap = document.createElement("div");
+        wrap.className = "huabi-popover-swatch-wrap";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "huabi-popover-swatch";
+        btn.title = "选用此颜色";
+        btn.style.background = c;
+        btn.addEventListener("click", () => {
+          this.engine.setProfile("rect", { color: saved[i] });
+          this._persistToolProfiles();
+          this._updateRectButtonColor();
+          colorInp.value = saved[i];
+        });
+        const edit = document.createElement("input");
+        edit.type = "color";
+        edit.className = "huabi-popover-swatch-edit";
+        edit.value = c;
+        edit.title = "编辑保存色";
+        edit.addEventListener("input", () => {
+          saved[i] = edit.value;
+          btn.style.background = edit.value;
+          this.engine.setProfile("rect", { savedColors: [...saved] });
+          this._persistToolProfiles();
+        });
+        wrap.appendChild(btn);
+        wrap.appendChild(edit);
+        swatchRow.appendChild(wrap);
+      });
+      body.appendChild(swatchRow);
+
+      const colorRow = document.createElement("label");
+      colorRow.className = "huabi-popover-row";
+      const colorSpan = document.createElement("span");
+      colorSpan.textContent = "颜色";
+      colorRow.appendChild(colorSpan);
+      colorRow.appendChild(colorInp);
+      body.appendChild(colorRow);
+
+      const fields = this._popoverFields();
+      const alphaPct = Math.round((rectProfile.fillAlpha ?? 0.5) * 100);
+      fields.appendChild(
+        this._popoverRangeRow("透明度", 10, 100, alphaPct, (v) => {
+          this.engine.setProfile("rect", { fillAlpha: v / 100 });
+          this._persistToolProfiles();
+        })
+      );
+      body.appendChild(fields);
     }
 
     _styleProfileId(toolId) {
@@ -1637,7 +2019,8 @@
       this.settings.coordTicks = this.engine.coordTicks;
       this.settings.coordStart = this.engine.coordStart;
       this.settings.coordStep = this.engine.coordStep;
-      this.settings.coordShowY = this.engine.coordShowY;
+      this.settings.coordMode = this.engine.coordMode;
+      this.settings.coordShowY = this.engine.coordMode === "cross";
       this.settings.textFontSize = this.engine.textFontSize;
       this.settings.arrowEnds = this.engine.arrowEnds;
       S.saveSettings(this.settings);
@@ -1710,7 +2093,12 @@
         !S.isEraserTool(toolId) &&
         toolId !== "table" &&
         toolId !== "axes" &&
-        toolId !== "text";
+        toolId !== "text" &&
+        toolId !== "rect";
+
+      if (toolId === "rect") {
+        this._appendRectPopoverBody(body, anchor);
+      }
 
       if (simpleShape) {
         body.appendChild(
@@ -1721,7 +2109,13 @@
         );
       }
 
-      if (!S.isEraserTool(toolId) && toolId !== "table" && toolId !== "axes" && toolId !== "text") {
+      if (
+        !S.isEraserTool(toolId) &&
+        toolId !== "table" &&
+        toolId !== "axes" &&
+        toolId !== "text" &&
+        toolId !== "rect"
+      ) {
         const fields = this._popoverFields();
         fields.appendChild(
           this._popoverRangeRow(
@@ -1732,6 +2126,9 @@
             (v) => {
               this.engine.setProfile(profileId, { lineWidth: v });
               this._persistToolProfiles();
+              if (S.isHighlighterTool(toolId)) {
+                this._updateCanvasCursors(toolId);
+              }
             }
           )
         );
@@ -1741,6 +2138,7 @@
             this._popoverRangeRow("透明度", 20, 80, alphaPct, (v) => {
               this.engine.setProfile(profileId, { highlightAlpha: v / 100 });
               this._persistToolProfiles();
+              this._updateCanvasCursors(toolId);
             })
           );
         }
@@ -1853,17 +2251,31 @@
             { min: 0.1, max: 10000, step: "any" }
           )
         );
-        fields.appendChild(
-          this._popoverCheckboxRow("显示 Y 轴", this.engine.coordShowY, (on) => {
-            this.engine.coordShowY = on;
-            this.settings.coordShowY = on;
-            this._persistToolProfiles();
-          })
-        );
+        const modeRow = document.createElement("label");
+        modeRow.className = "huabi-popover-row";
+        const modeSpan = document.createElement("span");
+        modeSpan.textContent = "坐标模式";
+        const modeSel = document.createElement("select");
+        modeSel.innerHTML =
+          '<option value="xOnly">仅 X 轴</option><option value="cross">十字坐标系</option><option value="firstQuadrant">仅第一象限</option>';
+        modeSel.value = S.COORD_MODES.includes(this.engine.coordMode)
+          ? this.engine.coordMode
+          : "xOnly";
+        modeSel.addEventListener("change", () => {
+          const mode = S.COORD_MODES.includes(modeSel.value) ? modeSel.value : "xOnly";
+          this.engine.coordMode = mode;
+          this.engine.coordShowY = mode === "cross";
+          this.settings.coordMode = mode;
+          this.settings.coordShowY = mode === "cross";
+          this._persistSettings();
+        });
+        modeRow.appendChild(modeSpan);
+        modeRow.appendChild(modeSel);
+        fields.appendChild(modeRow);
         body.appendChild(fields);
         body.appendChild(
           this._popoverHint(
-            "仅 X 轴：从左起按「起始 + i×跨度」标注（默认 0,1,2…）。勾选 Y 轴后：交点为原点，X 下左负右正，Y 左侧上正下负。拖拽划定区域。"
+            "仅 X 轴：水平线过区域中部，刻度从左起。十字：中心为原点，含正负半轴。第一象限：原点在左下角，只画 X/Y 正半轴与递增刻度。拖拽划定区域。"
           )
         );
       }
@@ -2167,6 +2579,171 @@
       return { left: b.left, top: b.top, width: b.width, height: b.height };
     }
 
+    _isResizableShape(item) {
+      return item && RESIZABLE_SHAPE_TYPES.has(item.type);
+    }
+
+    _getShapeResizeHandles(item) {
+      if (!this._isResizableShape(item)) return [];
+      if (item.type === "line" || item.type === "arrowLine") {
+        return [
+          { id: "p1", x: item.x1, y: item.y1, cursor: "grab" },
+          { id: "p2", x: item.x2, y: item.y2, cursor: "grab" },
+        ];
+      }
+      const b = this.engine._shapeBounds(item);
+      const { left, top, width, height } = b;
+      const cx = left + width / 2;
+      const cy = top + height / 2;
+      const right = left + width;
+      const bottom = top + height;
+      return [
+        { id: "nw", x: left, y: top, cursor: "nwse-resize" },
+        { id: "n", x: cx, y: top, cursor: "ns-resize" },
+        { id: "ne", x: right, y: top, cursor: "nesw-resize" },
+        { id: "e", x: right, y: cy, cursor: "ew-resize" },
+        { id: "se", x: right, y: bottom, cursor: "nwse-resize" },
+        { id: "s", x: cx, y: bottom, cursor: "ns-resize" },
+        { id: "sw", x: left, y: bottom, cursor: "nesw-resize" },
+        { id: "w", x: left, y: cy, cursor: "ew-resize" },
+      ];
+    }
+
+    _hitShapeResizeHandle(item, x, y) {
+      const handles = this._getShapeResizeHandles(item);
+      for (const h of handles) {
+        if (Math.hypot(x - h.x, y - h.y) <= RESIZE_HANDLE_HIT) return h;
+      }
+      return null;
+    }
+
+    _resolveShapePointerAction(x, y) {
+      const sel = this._selectedCanvasObject;
+      if (sel?.kind === "shape") {
+        const selected = this.engine.shapeItems.find((s) => s.id === sel.id);
+        if (selected && this._isResizableShape(selected)) {
+          const handle = this._hitShapeResizeHandle(selected, x, y);
+          if (handle) {
+            return {
+              action: "resize",
+              hit: { kind: "shape", item: selected },
+              handle,
+            };
+          }
+        }
+      }
+      const hit = this.engine.hitTestCanvasObject(x, y);
+      if (hit?.kind === "shape" && this._isResizableShape(hit.item)) {
+        const handle = this._hitShapeResizeHandle(hit.item, x, y);
+        if (handle) return { action: "resize", hit, handle };
+        return { action: "move", hit };
+      }
+      for (let i = this.engine.shapeItems.length - 1; i >= 0; i--) {
+        const item = this.engine.shapeItems[i];
+        if (!this._isResizableShape(item)) continue;
+        const handle = this._hitShapeResizeHandle(item, x, y);
+        if (handle) {
+          return { action: "resize", hit: { kind: "shape", item }, handle };
+        }
+      }
+      if (hit) return { action: "move", hit };
+      return null;
+    }
+
+    _shapeResizePatch(anchor, shapeType, handleId, x, y, shiftKey) {
+      if (shapeType === "line" || shapeType === "arrowLine") {
+        let x1 = anchor.x1;
+        let y1 = anchor.y1;
+        let x2 = anchor.x2;
+        let y2 = anchor.y2;
+        if (handleId === "p1") {
+          if (shiftKey) {
+            const snapped = this.engine._snapLinePoint(x2, y2, x, y);
+            x1 = snapped.x;
+            y1 = snapped.y;
+          } else {
+            x1 = x;
+            y1 = y;
+          }
+        } else if (handleId === "p2") {
+          if (shiftKey) {
+            const snapped = this.engine._snapLinePoint(x1, y1, x, y);
+            x2 = snapped.x;
+            y2 = snapped.y;
+          } else {
+            x2 = x;
+            y2 = y;
+          }
+        }
+        if (Math.hypot(x2 - x1, y2 - y1) < 1) return null;
+        return { x1, y1, x2, y2 };
+      }
+
+      let left = Math.min(anchor.x1, anchor.x2);
+      let right = Math.max(anchor.x1, anchor.x2);
+      let top = Math.min(anchor.y1, anchor.y2);
+      let bottom = Math.max(anchor.y1, anchor.y2);
+
+      const corner =
+        handleId === "nw" ||
+        handleId === "ne" ||
+        handleId === "se" ||
+        handleId === "sw";
+      if (corner && shiftKey && ["rect", "circle", "table"].includes(shapeType)) {
+        const fixed =
+          handleId === "nw"
+            ? { x: right, y: bottom }
+            : handleId === "ne"
+              ? { x: left, y: bottom }
+              : handleId === "se"
+                ? { x: left, y: top }
+                : { x: right, y: top };
+        const snapped = this.engine._snapSquarePoint(fixed.x, fixed.y, x, y);
+        x = snapped.x;
+        y = snapped.y;
+      }
+
+      if (handleId === "nw" || handleId === "n" || handleId === "ne") top = y;
+      if (handleId === "sw" || handleId === "s" || handleId === "se") bottom = y;
+      if (handleId === "nw" || handleId === "w" || handleId === "sw") left = x;
+      if (handleId === "ne" || handleId === "e" || handleId === "se") right = x;
+
+      const minSize = shapeType === "table" ? 4 : 2;
+      if (right - left < minSize) {
+        if (handleId === "nw" || handleId === "w" || handleId === "sw") {
+          left = right - minSize;
+        } else {
+          right = left + minSize;
+        }
+      }
+      if (bottom - top < minSize) {
+        if (handleId === "nw" || handleId === "n" || handleId === "ne") {
+          top = bottom - minSize;
+        } else {
+          bottom = top + minSize;
+        }
+      }
+
+      const x1 = anchor.x1 <= anchor.x2 ? left : right;
+      const x2 = anchor.x1 <= anchor.x2 ? right : left;
+      const y1 = anchor.y1 <= anchor.y2 ? top : bottom;
+      const y2 = anchor.y1 <= anchor.y2 ? bottom : top;
+      return { x1, y1, x2, y2 };
+    }
+
+    _drawResizeHandles(ctx, item) {
+      const handles = this._getShapeResizeHandles(item);
+      const s = RESIZE_HANDLE_DRAW;
+      for (const h of handles) {
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "#0078d4";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.fillRect(h.x - s, h.y - s, s * 2, s * 2);
+        ctx.strokeRect(h.x - s + 0.5, h.y - s + 0.5, s * 2 - 1, s * 2 - 1);
+      }
+    }
+
     _renderCanvasSelection() {
       this.engine.clearPreview();
       const bounds = this._selectionBounds(this._selectedCanvasObject);
@@ -2186,6 +2763,14 @@
         bounds.width + pad * 2,
         bounds.height + pad * 2
       );
+      ctx.setLineDash([]);
+      const sel = this._selectedCanvasObject;
+      if (sel?.kind === "shape") {
+        const item = this.engine.shapeItems.find((s) => s.id === sel.id);
+        if (item && this._isResizableShape(item)) {
+          this._drawResizeHandles(ctx, item);
+        }
+      }
       ctx.restore();
     }
 
@@ -2497,10 +3082,18 @@
       if (id === "eraser") kind = "eraser";
       else if (S.isPenTool(id)) kind = "pen";
       else if (S.isHighlighterTool(id)) kind = "highlighter";
-      const meta = C.getFollowerMeta(kind, {
-        color: this._getBrushCursorColor(),
+      const opts = {
         eraserSize: Math.max(this.engine.getProfile("eraser").lineWidth || 16, 8),
-      });
+      };
+      if (S.isHighlighterTool(id)) {
+        const profile = this.engine.getProfile(id);
+        opts.color = profile.color;
+        opts.highlightAlpha = profile.highlightAlpha ?? 0.4;
+        opts.lineWidth = profile.lineWidth ?? 12;
+      } else {
+        opts.color = this._getBrushCursorColor();
+      }
+      const meta = C.getFollowerMeta(kind, opts);
       this._cursorFollowerHot = { x: meta.hotX, y: meta.hotY };
       el.style.width = `${meta.width}px`;
       el.style.height = `${meta.height}px`;
@@ -2722,6 +3315,9 @@
         pagePassStartX = 0;
         pagePassStartY = 0;
         this.root?.classList.remove("huabi-object-dragging");
+        this.root?.classList.remove("huabi-object-resizing");
+        this.root?.style.removeProperty("--huabi-resize-cursor");
+        this._objectResizeCursor = null;
       };
 
       const startPagePassTrack = (pageTarget, e) => {
@@ -2743,6 +3339,7 @@
         stopObjectTrack();
         if (hit.kind === "text") {
           objectDrag = {
+            mode: "move",
             kind: "text",
             id: hit.item.id,
             pointerX: x,
@@ -2753,6 +3350,7 @@
           };
         } else {
           objectDrag = {
+            mode: "move",
             kind: "shape",
             id: hit.item.id,
             pointerX: x,
@@ -2771,6 +3369,45 @@
         window.addEventListener("mouseup", objectUp, true);
       };
 
+      const startObjectResize = (hit, handle, x, y) => {
+        this._selectCanvasObject(hit);
+        stopObjectTrack();
+        objectDrag = {
+          mode: "resize",
+          kind: "shape",
+          id: hit.item.id,
+          shapeType: hit.item.type,
+          handleId: handle.id,
+          pointerX: x,
+          pointerY: y,
+          anchor: {
+            x1: hit.item.x1,
+            y1: hit.item.y1,
+            x2: hit.item.x2,
+            y2: hit.item.y2,
+          },
+          resizeCursor: handle.cursor,
+          dragging: false,
+        };
+        this._objectResizeCursor = handle.cursor;
+        window.addEventListener("pointermove", objectMove, true);
+        window.addEventListener("pointerup", objectUp, true);
+        window.addEventListener("pointercancel", objectUp, true);
+        window.addEventListener("mousemove", objectMove, true);
+        window.addEventListener("mouseup", objectUp, true);
+      };
+
+      const beginShapeInteraction = (x, y) => {
+        const resolved = this._resolveShapePointerAction(x, y);
+        if (!resolved) return false;
+        if (resolved.action === "resize") {
+          startObjectResize(resolved.hit, resolved.handle, x, y);
+        } else {
+          startObjectDrag(resolved.hit, x, y);
+        }
+        return true;
+      };
+
       const objectMove = (e) => {
         if (pagePassTarget && !objectDrag) return;
         if (!objectDrag) return;
@@ -2781,7 +3418,15 @@
           if (Math.hypot(dx, dy) < OBJECT_DRAG_THRESHOLD) return;
           objectDrag.dragging = true;
           this.engine.pushHistory();
-          this.root?.classList.add("huabi-object-dragging");
+          if (objectDrag.mode === "resize") {
+            this.root?.classList.add("huabi-object-resizing");
+            this.root?.style.setProperty(
+              "--huabi-resize-cursor",
+              objectDrag.resizeCursor || "nwse-resize"
+            );
+          } else {
+            this.root?.classList.add("huabi-object-dragging");
+          }
         }
         if (objectDrag.kind === "text") {
           this.engine.updateTextItem(objectDrag.id, {
@@ -2789,6 +3434,19 @@
             y: objectDrag.itemY + dy,
           });
           this.engine.renderTexts();
+        } else if (objectDrag.mode === "resize") {
+          const patch = this._shapeResizePatch(
+            objectDrag.anchor,
+            objectDrag.shapeType,
+            objectDrag.handleId,
+            x,
+            y,
+            e.shiftKey
+          );
+          if (patch) {
+            this.engine.updateShapeItem(objectDrag.id, patch);
+            this.engine.renderShapes();
+          }
         } else {
           this.engine.updateShapeItem(objectDrag.id, {
             x1: objectDrag.x1 + dx,
@@ -2829,9 +3487,7 @@
         if (skipTarget(e.target)) return;
         if (e.button !== 0) return;
         const { x, y } = this.engine.getPos(e);
-        const hit = this.engine.hitTestCanvasObject(x, y);
-        if (!hit) return;
-        startObjectDrag(hit, x, y);
+        if (!beginShapeInteraction(x, y)) return;
         e.preventDefault();
         e.stopPropagation();
       };
@@ -2874,9 +3530,7 @@
         }
 
         if (S.isShapeTool(toolId)) {
-          const hit = this.engine.hitTestCanvasObject(x, y);
-          if (hit) {
-            startObjectDrag(hit, x, y);
+          if (beginShapeInteraction(x, y)) {
             e.preventDefault();
             e.stopPropagation();
             return;
@@ -3149,6 +3803,13 @@
         }
       }
 
+      if (K.matchShortcut(e, shortcuts.toggleVisibility)) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleNotesVisibility();
+        return;
+      }
+
       if (!this.brushMode) {
         return;
       }
@@ -3180,11 +3841,6 @@
         this.exportPng();
         return;
       }
-      if (K.matchShortcut(e, shortcuts.toggleVisibility)) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.toggleNotesVisibility();
-      }
     }
 
     async setActive(on) {
@@ -3212,7 +3868,8 @@
         this.engine.coordTicks = this.settings.coordTicks ?? 5;
         this.engine.coordStart = this.settings.coordStart ?? 0;
         this.engine.coordStep = this.settings.coordStep ?? 1;
-        this.engine.coordShowY = this.settings.coordShowY === true;
+        this.engine.coordMode = S.normalizeCoordMode(this.settings);
+        this.engine.coordShowY = this.engine.coordMode === "cross";
         this.engine.textFontSize = this.settings.textFontSize ?? 0;
         this.engine.arrowEnds =
           this.settings.arrowEnds === "both" ? "both" : "end";
