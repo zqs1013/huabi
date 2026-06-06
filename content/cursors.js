@@ -22,15 +22,18 @@
     cap: "M17 17V8L31 4V17",
   };
 
-  function penMeta(color) {
+  function penMeta(color, { simple = false } = {}) {
     const fill = color || "#252423";
     const stroke = "#000000";
+    const deco = simple
+      ? ""
+      : `<path d="${PEN_PATHS.stroke1}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${PEN_PATHS.stroke2}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${PEN_PATHS.stroke3}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
       <g transform="rotate(90 24 24)">
         <path d="${PEN_PATHS.body}" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="${PEN_PATHS.stroke1}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="${PEN_PATHS.stroke2}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="${PEN_PATHS.stroke3}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        ${deco}
       </g>
     </svg>`;
     return { svg, width: 48, height: 48, hotX: 6, hotY: 6 };
@@ -119,7 +122,9 @@
   function getFollowerMeta(kind, options = {}) {
     const color = options.color;
     if (kind === "eraser") return eraserMeta(options.eraserSize ?? 16);
-    if (kind === "pen") return penMeta(color);
+    if (kind === "pen") {
+      return penMeta(color, { simple: !!options.pressureEnabled });
+    }
     if (kind === "highlighter") {
       return highlighterDotMeta(
         color,

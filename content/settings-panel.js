@@ -63,6 +63,7 @@
           this.overlay._updatePenButtonColors();
           this.overlay._rebuildToolbarTools();
         },
+        onClose: (opts) => void this.hide(opts?.skipFlush),
       });
       this.visible = true;
       this.backdrop.hidden = false;
@@ -72,8 +73,8 @@
       this._positionPanel();
     }
 
-    async hide() {
-      if (this.formApi?.flushSave) {
+    async hide(skipFlush = false) {
+      if (!skipFlush && this.formApi?.flushSave) {
         try {
           await this.formApi.flushSave();
         } catch {

@@ -243,6 +243,41 @@
   border-top: 1px solid #edebe9;
 }
 
+.huabi-about-section {
+  margin-bottom: 8px;
+}
+
+.huabi-about-info {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #faf9f8;
+  border: 1px solid #edebe9;
+}
+
+.huabi-about-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.huabi-about-row + .huabi-about-row {
+  margin-top: 4px;
+}
+
+.huabi-about-row span:first-child {
+  color: #605e5c;
+  flex-shrink: 0;
+}
+
+.huabi-about-row span:last-child {
+  color: #252423;
+  text-align: right;
+}
+
 .huabi-btn {
   padding: 8px 14px;
   border: 1px solid #c8c6c4;
@@ -366,4 +401,79 @@
 
 .huabi-form-status.error {
   color: #a4262c;
+}
+
+.huabi-form-hint--tight {
+  margin-bottom: 6px;
+}
+
+.huabi-settings-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.huabi-settings-row-head h3 {
+  margin: 0;
+}
+
+.huabi-pressure-section {
+  position: relative;
+}
+
+.huabi-settings-pop-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 6px;
+  background: #fff;
+  color: #605e5c;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.huabi-settings-pop-trigger:hover {
+  background: #f3f2f1;
+  border-color: #a19f9d;
+}
+
+.huabi-settings-pop-trigger.huabi-settings-pop-open {
+  background: #deecf9;
+  border-color: #0078d4;
+  color: #0078d4;
+}
+
+.huabi-settings-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% - 4px);
+  z-index: 3;
+  min-width: min(260px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid #edebe9;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.huabi-settings-popover[hidden] {
+  display: none !important;
+}
+
+.huabi-settings-popover .huabi-toolbar-visible-item {
+  margin-bottom: 8px;
+}
+
+.huabi-settings-popover .huabi-label-row {
+  margin-bottom: 8px;
+}
+
+.huabi-settings-popover .huabi-form-hint {
+  margin: 4px 0 0;
 }

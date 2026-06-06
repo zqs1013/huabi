@@ -268,7 +268,7 @@
   async function fetchBundledFontManifest() {
     const bust = `?t=${Date.now()}`;
     const sources = await Promise.all([
-      fetch(chrome.runtime.getURL("content/fonts/manifest.json" + bust))
+      fetch(chrome.runtime.getURL("content/fonts/fonts-manifest.json" + bust))
         .then((r) => (r.ok ? r.json() : []))
         .catch(() => []),
       fetch(chrome.runtime.getURL("content/fonts/bundle-index.json" + bust))
@@ -526,10 +526,58 @@
     }
   }
 
+  const DEFAULT_PRESSURE_MIN_RATIO = 0.35;
+  const DEFAULT_PRESSURE_MAX_RATIO = 1;
+
+  /** 从 PointerEvent 解析 0～1 压感；无压感时返回 1（使用工具栏线宽） */
+  function resolvePointerPressure(e, settings) {
+    if (!settings?.pressureEnabled) return 1;
+    if (settings.pressurePenOnly !== false && e?.pointerType !== "pen") return 1;
+    let p = e?.pressure;
+    if (typeof p !== "number" || !Number.isFinite(p)) return 1;
+    if (e.pointerType === "mouse" && Math.abs(p - 0.5) < 0.01) return 1;
+    if (p <= 0) return 0;
+    return Math.min(1, p);
+  }
+
+  /** 线宽倍数：压感 0 → minRatio，压感 1 → maxRatio */
+  function pressureScaleFactor(e, settings) {
+    if (!settings?.pressureEnabled) return 1;
+    const p = resolvePointerPressure(e, settings);
+    const minR = settings.pressureMinRatio ?? DEFAULT_PRESSURE_MIN_RATIO;
+    const maxR = settings.pressureMaxRatio ?? DEFAULT_PRESSURE_MAX_RATIO;
+    return minR + (maxR - minR) * p;
+  }
+
+  function lineWidthFromPressure(baseWidth, e, settings) {
+    const base = Math.max(1, baseWidth || 1);
+    return Math.max(1, base * pressureScaleFactor(e, settings));
+  }
+
+  function normalizePressureSettings(raw, def) {
+    const d = def || getDefaultSettings();
+    return {
+      pressureEnabled: raw?.pressureEnabled !== false,
+      pressurePenOnly: raw?.pressurePenOnly !== false,
+      pressureMinRatio: clampPressureRatio(raw?.pressureMinRatio, d.pressureMinRatio),
+      pressureMaxRatio: clampPressureRatio(raw?.pressureMaxRatio, d.pressureMaxRatio),
+    };
+  }
+
+  function clampPressureRatio(v, fallback) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0.1, Math.min(2, Math.round(n * 100) / 100));
+  }
+
   function getDefaultSettings() {
     return {
       toolProfiles: deepClone(DEFAULT_TOOL_PROFILES),
       lastPenTool: DEFAULT_PEN_TOOL,
+      pressureEnabled: true,
+      pressurePenOnly: true,
+      pressureMinRatio: DEFAULT_PRESSURE_MIN_RATIO,
+      pressureMaxRatio: DEFAULT_PRESSURE_MAX_RATIO,
       tableRows: 3,
       tableCols: 3,
       coordTicks: 5,
@@ -612,6 +660,11 @@
     settings.coordStep =
       Number.isFinite(step) && step > 0 && step <= 10000 ? step : def.coordStep;
     settings.coordShowY = settings.coordMode === "cross";
+    Object.assign(settings, normalizePressureSettings(raw, def));
+    if (settings.pressureMinRatio > settings.pressureMaxRatio) {
+      settings.pressureMinRatio = def.pressureMinRatio;
+      settings.pressureMaxRatio = def.pressureMaxRatio;
+    }
     return settings;
   }
 
@@ -811,6 +864,15 @@
     return [c, c, c];
   }
 
+  /** 将颜色记入最近列表（最多 3 个，最新在前） */
+  function pushRecentColor(savedColors, color) {
+    if (!color) return Array.isArray(savedColors) ? savedColors.slice(0, 3) : [];
+    const norm = String(color).toLowerCase();
+    const prev = Array.isArray(savedColors) ? savedColors.filter(Boolean) : [];
+    const rest = prev.filter((c) => String(c).toLowerCase() !== norm);
+    return [color, ...rest].slice(0, 3);
+  }
+
   window.HuabiSettings = {
     SETTINGS_KEY,
     DEFAULT_PEN_TOOL,
@@ -831,6 +893,7 @@
     getDefaultSettings,
     normalizeToolProfiles,
     getSavedColors,
+    pushRecentColor,
     isPenTool,
     isHighlighterTool,
     isShapeTool,
@@ -861,6 +924,12 @@
     getPageDefaultFontSize,
     getDefaultTextFontSize,
     resolveTextFontSize,
+    DEFAULT_PRESSURE_MIN_RATIO,
+    DEFAULT_PRESSURE_MAX_RATIO,
+    resolvePointerPressure,
+    pressureScaleFactor,
+    lineWidthFromPressure,
+    normalizePressureSettings,
     COORD_MODES,
     normalizeCoordMode,
     coordModeNeedsHeight,

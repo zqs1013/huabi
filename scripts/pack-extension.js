@@ -34,6 +34,8 @@ function shouldSkip(relPath) {
   if (parts[0] === "content" && parts[1] === "fonts") {
     const ext = path.extname(base).toLowerCase();
     if (FONT_EXT.has(ext)) return true;
+    // 避免与扩展根 manifest.json 冲突（Edge/Chrome 商店校验）
+    if (base === "manifest.json") return true;
   }
   return false;
 }
@@ -60,7 +62,7 @@ function writeEmptyFontArtifacts(stageDir) {
   const fontsDir = path.join(stageDir, "content", "fonts");
   fs.mkdirSync(fontsDir, { recursive: true });
   fs.writeFileSync(
-    path.join(fontsDir, "manifest.json"),
+    path.join(fontsDir, "fonts-manifest.json"),
     "[]\n",
     "utf8"
   );

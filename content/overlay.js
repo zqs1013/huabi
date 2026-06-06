@@ -61,6 +61,8 @@
       this._hlStrokeCtx = null;
       this._hlBBox = null;
       this._hlCommitSnap = null;
+      this._pressureSettings = S.normalizePressureSettings(settings);
+      this._lastPointerPressure = 1;
     }
 
     _activeTool() {
@@ -80,6 +82,21 @@
       this.textFontSize = settings.textFontSize ?? 0;
       this.textFontFamily = S.normalizeTextFontFamily(settings.textFontFamily);
       this.arrowEnds = settings.arrowEnds === "both" ? "both" : "end";
+      this._pressureSettings = S.normalizePressureSettings(settings);
+    }
+
+    _pressureCfg() {
+      return this._pressureSettings;
+    }
+
+    _forEachCoalescedEvents(e, fn) {
+      const list =
+        typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
+      if (list?.length) {
+        for (const ev of list) fn(ev);
+      } else {
+        fn(e);
+      }
     }
 
     getProfile(toolId) {
@@ -944,12 +961,13 @@
       this._hlBBox.maxY = Math.max(this._hlBBox.maxY, y + pad);
     }
 
-    applyHlStrokeStyle(ctx) {
+    applyHlStrokeStyle(ctx, e) {
       const style = this.getActiveStyle();
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
       ctx.strokeStyle = style.color;
-      ctx.lineWidth = Math.max(style.lineWidth * 1.5, 12);
+      const base = Math.max(style.lineWidth * 1.5, 12);
+      ctx.lineWidth = S.lineWidthFromPressure(base, e, this._pressureCfg());
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
     }
@@ -1044,17 +1062,17 @@
       if (clearStroke) this._clearHlStroke();
     }
 
-    _eraseAtBoth(x, y) {
-      this._eraseAt(this.mainCtx, x, y);
-      this._eraseAt(this.highlightCtx, x, y);
+    _eraseAtBoth(x, y, e) {
+      this._eraseAt(this.mainCtx, x, y, e);
+      this._eraseAt(this.highlightCtx, x, y, e);
     }
 
-    _eraseLineBoth(x0, y0, x1, y1) {
-      const r = this._eraserRadius();
+    _eraseLineBoth(x0, y0, x1, y1, e) {
+      const r = this._eraserRadius(e);
       const dist = Math.hypot(x1 - x0, y1 - y0);
       const step = Math.max(r * 0.35, 1);
       if (dist === 0) {
-        this._eraseAtBoth(x0, y0);
+        this._eraseAtBoth(x0, y0, e);
         return;
       }
       for (let d = 0; d <= dist; d += step) {
@@ -1062,20 +1080,23 @@
         this._eraseAtBoth(
           x0 + (x1 - x0) * t,
           y0 + (y1 - y0) * t,
+          e
         );
       }
     }
 
-    _eraserRadius() {
+    _eraserRadius(e) {
       const er = this.getProfile("eraser");
-      return Math.max((er.lineWidth || 16) / 2, 8);
+      const base = Math.max((er.lineWidth || 16) / 2, 8);
+      if (!e) return base;
+      return Math.max(4, base * S.pressureScaleFactor(e, this._pressureCfg()));
     }
 
     /** 像素级擦除（忽略 transform，与笔迹坐标一致） */
-    _eraseAt(ctx, x, y) {
+    _eraseAt(ctx, x, y, e) {
       const canvas = this.mainCanvas;
       const dpr = this.dpr || 1;
-      const r = this._eraserRadius();
+      const r = this._eraserRadius(e);
       const cx = Math.round(x * dpr);
       const cy = Math.round(y * dpr);
       const cr = Math.ceil(r * dpr);
@@ -1140,7 +1161,7 @@
       ctx.globalAlpha = 1;
     }
 
-    applyStrokeStyle(ctx) {
+    applyStrokeStyle(ctx, e) {
       const style = this.getActiveStyle();
       if (this.tool === "eraser") {
         return;
@@ -1149,7 +1170,7 @@
       } else {
         ctx.globalCompositeOperation = "source-over";
         ctx.strokeStyle = style.color;
-        ctx.lineWidth = style.lineWidth;
+        ctx.lineWidth = S.lineWidthFromPressure(style.lineWidth, e, this._pressureCfg());
       }
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
@@ -1181,7 +1202,8 @@
       if (S.isEraserTool(tool)) {
         this.pushHistory();
         this._erasing = true;
-        this._eraseAtBoth(x, y);
+        this._lastPointerPressure = S.resolvePointerPressure(e, this._pressureCfg());
+        this._eraseAtBoth(x, y, e);
       } else if (S.isHighlighterTool(tool)) {
         this.pushHistory();
         this._resizeHlStrokeCanvas();
@@ -1189,12 +1211,14 @@
         this._hlBBox = null;
         this._hlCommitSnap = this._captureHighlight();
         this._expandHlBBox(x, y);
-        this.applyHlStrokeStyle(this._hlStrokeCtx);
+        this._lastPointerPressure = S.resolvePointerPressure(e, this._pressureCfg());
+        this.applyHlStrokeStyle(this._hlStrokeCtx, e);
         this._hlStrokeCtx.beginPath();
         this._hlStrokeCtx.moveTo(x, y);
       } else if (S.isFreehandTool(tool)) {
         this.pushHistory();
-        this.applyStrokeStyle(this.mainCtx);
+        this._lastPointerPressure = S.resolvePointerPressure(e, this._pressureCfg());
+        this.applyStrokeStyle(this.mainCtx, e);
         this.mainCtx.beginPath();
         this.mainCtx.moveTo(x, y);
       } else if (S.isShapeTool(tool)) {
@@ -1205,6 +1229,46 @@
     onPointerMove(e) {
       if (!this.isDrawing) return;
       const tool = this._activeTool();
+
+      if (S.isEraserTool(tool)) {
+        this._forEachCoalescedEvents(e, (ev) => {
+          const { x, y } = this.getPos(ev);
+          this._eraseLineBoth(this.lastX, this.lastY, x, y, ev);
+          this._lastPointerPressure = S.resolvePointerPressure(ev, this._pressureCfg());
+          this.lastX = x;
+          this.lastY = y;
+        });
+        return;
+      }
+
+      if (S.isHighlighterTool(tool)) {
+        this._forEachCoalescedEvents(e, (ev) => {
+          const { x, y } = this.getPos(ev);
+          this._expandHlBBox(x, y);
+          this.applyHlStrokeStyle(this._hlStrokeCtx, ev);
+          this._hlStrokeCtx.lineTo(x, y);
+          this._hlStrokeCtx.stroke();
+          this._hlStrokeCtx.beginPath();
+          this._hlStrokeCtx.moveTo(x, y);
+          this._lastPointerPressure = S.resolvePointerPressure(ev, this._pressureCfg());
+        });
+        this._refreshHlStrokeLive();
+        return;
+      }
+
+      if (S.isFreehandTool(tool)) {
+        this._forEachCoalescedEvents(e, (ev) => {
+          const { x, y } = this.getPos(ev);
+          this.applyStrokeStyle(this.mainCtx, ev);
+          this.mainCtx.lineTo(x, y);
+          this.mainCtx.stroke();
+          this.mainCtx.beginPath();
+          this.mainCtx.moveTo(x, y);
+          this._lastPointerPressure = S.resolvePointerPressure(ev, this._pressureCfg());
+        });
+        return;
+      }
+
       const raw = this.getPos(e);
       const { x, y } = this._constrainShapePoint(
         this.startX,
@@ -1214,33 +1278,6 @@
         tool,
         e.shiftKey
       );
-
-      if (S.isEraserTool(tool)) {
-        this._eraseLineBoth(this.lastX, this.lastY, x, y);
-        this.lastX = x;
-        this.lastY = y;
-        return;
-      }
-
-      if (S.isHighlighterTool(tool)) {
-        this._expandHlBBox(x, y);
-        this.applyHlStrokeStyle(this._hlStrokeCtx);
-        this._hlStrokeCtx.lineTo(x, y);
-        this._hlStrokeCtx.stroke();
-        this._hlStrokeCtx.beginPath();
-        this._hlStrokeCtx.moveTo(x, y);
-        this._refreshHlStrokeLive();
-        return;
-      }
-
-      if (S.isFreehandTool(tool)) {
-        this.applyStrokeStyle(this.mainCtx);
-        this.mainCtx.lineTo(x, y);
-        this.mainCtx.stroke();
-        this.mainCtx.beginPath();
-        this.mainCtx.moveTo(x, y);
-        return;
-      }
 
       this.clearPreview();
       const ctx = this.previewCtx;
@@ -1299,7 +1336,7 @@
       );
 
       if (S.isEraserTool(tool)) {
-        this._eraseLineBoth(this.lastX, this.lastY, x, y);
+        this._eraseLineBoth(this.lastX, this.lastY, x, y, e);
         this._endErase(this.mainCtx);
         this.clearPreview();
         return false;
@@ -1892,6 +1929,52 @@
       }
     }
 
+    _appendToolColorPopoverBody(body, toolId) {
+      const profile = this.engine.getProfile(toolId);
+      let saved = [...S.getSavedColors(profile, toolId)];
+      let currentColor = profile.color || saved[0];
+
+      const swatchRow = document.createElement("div");
+      swatchRow.className = "huabi-popover-colors";
+
+      const colorInp = document.createElement("input");
+      colorInp.type = "color";
+      colorInp.value = currentColor;
+      colorInp.title = "自定义颜色";
+
+      const refreshSwatches = () => {
+        swatchRow.querySelectorAll(".huabi-popover-swatch").forEach((el) => el.remove());
+        saved.forEach((c) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "huabi-popover-swatch";
+          btn.title = "选用此颜色";
+          btn.style.background = c;
+          if (String(currentColor).toLowerCase() === String(c).toLowerCase()) {
+            btn.classList.add("huabi-popover-swatch--active");
+          }
+          btn.addEventListener("click", () => applyColor(c));
+          swatchRow.insertBefore(btn, colorInp);
+        });
+      };
+
+      const applyColor = (hex) => {
+        saved = S.pushRecentColor(saved, hex);
+        currentColor = hex;
+        this.engine.setProfile(toolId, { color: hex, savedColors: [...saved] });
+        this._persistToolProfiles();
+        this._updatePenButtonColors();
+        this._updateCanvasCursors(toolId);
+        colorInp.value = hex;
+        refreshSwatches();
+      };
+
+      colorInp.addEventListener("input", () => applyColor(colorInp.value));
+      swatchRow.appendChild(colorInp);
+      refreshSwatches();
+      body.appendChild(swatchRow);
+    }
+
     _appendRectPopoverBody(body, anchor) {
       const rectProfile = this.engine.getProfile("rect");
       const rectMode = rectProfile.rectMode === "fill" ? "fill" : "stroke";
@@ -2078,12 +2161,16 @@
       const body = this.toolPopover.querySelector(".huabi-popover-body");
       body.innerHTML = "";
       const title = S.TOOL_STYLE_LABELS[toolId] || toolId;
-      body.appendChild(
-        Object.assign(document.createElement("p"), {
-          className: "huabi-popover-title",
-          textContent: title,
-        })
-      );
+      const titleEl = document.createElement("p");
+      titleEl.className = "huabi-popover-title";
+      titleEl.appendChild(document.createTextNode(title));
+      if (S.COLOR_EDIT_TOOLS.includes(toolId)) {
+        const note = document.createElement("span");
+        note.className = "huabi-popover-title-note";
+        note.textContent = "  点击色块选用；保留最近 3 次";
+        titleEl.appendChild(note);
+      }
+      body.appendChild(titleEl);
 
       const profileId = this._styleProfileId(toolId);
       const profile = this.engine.getProfile(profileId);
@@ -2098,6 +2185,10 @@
 
       if (toolId === "rect") {
         this._appendRectPopoverBody(body, anchor);
+      }
+
+      if (S.COLOR_EDIT_TOOLS.includes(toolId)) {
+        this._appendToolColorPopoverBody(body, toolId);
       }
 
       if (simpleShape) {
@@ -2468,6 +2559,75 @@
       document.addEventListener("keydown", this._onPopoverEsc, true);
     }
 
+    _shortcutTip(label, actionId) {
+      if (!label) return "";
+      const shortcuts = this.settings?.shortcuts || S.DEFAULT_SHORTCUTS;
+      const raw = actionId ? shortcuts[actionId] : "";
+      if (!raw) return label;
+      const combo = K.formatShortcutDisplay(raw);
+      if (!combo || combo === "未设置") return label;
+      return `${label} · ${combo}`;
+    }
+
+    _applyToolbarTip(el, label, actionId) {
+      if (!el) return;
+      const tip = this._shortcutTip(label, actionId);
+      el.dataset.tip = tip;
+      el.title = tip;
+    }
+
+    _syncToolbarShortcutTips() {
+      if (!this.toolbar) return;
+      const bar = this.toolbar;
+      const toolLabels = {
+        pen1: "画笔1",
+        pen2: "画笔2",
+        highlighter1: "荧光笔1",
+        highlighter2: "荧光笔2",
+        line: "直线",
+        rect: "矩形",
+        arrowLine: "箭头直线",
+        circle: "圆形",
+        table: "表格",
+        axes: "坐标系",
+        text: "文字",
+        eraser: "橡皮擦",
+      };
+
+      const modeBtn = bar.querySelector("#huabi-mode-toggle");
+      if (modeBtn) {
+        const base = this.brushMode
+          ? "画笔模式（点击切换为鼠标）"
+          : "鼠标模式（点击切换为画笔）";
+        this._applyToolbarTip(modeBtn, base, "toggleDrawMode");
+      }
+
+      bar.querySelectorAll("[data-tool]").forEach((btn) => {
+        const id = btn.dataset.tool;
+        this._applyToolbarTip(btn, toolLabels[id] || id, id);
+      });
+
+      bar.querySelectorAll(".huabi-tool-caret").forEach((btn) => {
+        btn.dataset.tip = "样式设置";
+        btn.title = "样式设置";
+      });
+
+      this._applyToolbarTip(bar.querySelector("#huabi-undo"), "撤销", "undo");
+      this._applyToolbarTip(bar.querySelector("#huabi-redo"), "恢复", "redo");
+      this._applyToolbarTip(bar.querySelector("#huabi-clear"), "全部清除", "clear");
+      this._applyToolbarTip(bar.querySelector("#huabi-export"), "保存", "export");
+
+      const visBtn = bar.querySelector("#huabi-toggle-visibility");
+      if (visBtn) {
+        const base = this.notesHidden ? "显示笔记" : "隐藏笔记";
+        this._applyToolbarTip(visBtn, base, "toggleVisibility");
+      }
+
+      this._applyToolbarTip(bar.querySelector("#huabi-open-settings"), "设置", null);
+      this._applyToolbarTip(bar.querySelector("#huabi-close"), "关闭标注", null);
+      this._applyToolbarTip(bar.querySelector(".huabi-drag-handle"), "拖动", null);
+    }
+
     syncToolbarFromTool() {
       const engine = this.engine;
       const bar = this.toolbar;
@@ -2481,19 +2641,16 @@
       if (modeBtn) {
         modeBtn.classList.remove("huabi-active-tool");
         modeBtn.classList.toggle("huabi-mode-active", !this.brushMode);
-        modeBtn.title = this.brushMode
-          ? "画笔模式（点击切换为鼠标）"
-          : "鼠标模式：点网页操作页面，点中标注可选中移动（点击切换为画笔）";
       }
 
       const visBtn = bar.querySelector("#huabi-toggle-visibility");
       if (visBtn) {
         const iconEl = visBtn.querySelector(".huabi-icon");
         if (iconEl) iconEl.innerHTML = I.get(this.notesHidden ? "eyeOff" : "eye");
-        visBtn.title = this.notesHidden ? "显示笔记" : "隐藏笔记";
         visBtn.classList.toggle("huabi-active-tool", this.notesHidden);
       }
 
+      this._syncToolbarShortcutTips();
       this._updateCanvasCursors();
     }
 
@@ -3055,12 +3212,6 @@
     applyBrushModeUI() {
       this.root.classList.toggle("huabi-mouse-mode", this.active && !this.brushMode);
       this.root.classList.toggle("huabi-brush-mode", this.active && this.brushMode);
-      const modeBtn = this.toolbar.querySelector("#huabi-mode-toggle");
-      if (modeBtn) {
-        modeBtn.title = this.brushMode
-          ? "画笔模式（点击切换为鼠标）"
-          : "鼠标模式：点网页操作页面，点中标注可选中移动（点击切换为画笔）";
-      }
       if (!this.active || !this.brushMode) this._hideCursorFollower();
       if (this._selectedCanvasObject) this._renderCanvasSelection();
       this.syncToolbarFromTool();
@@ -3084,6 +3235,7 @@
       else if (S.isHighlighterTool(id)) kind = "highlighter";
       const opts = {
         eraserSize: Math.max(this.engine.getProfile("eraser").lineWidth || 16, 8),
+        pressureEnabled: !!this.settings?.pressureEnabled,
       };
       if (S.isHighlighterTool(id)) {
         const profile = this.engine.getProfile(id);
@@ -3100,14 +3252,15 @@
       el.style.backgroundImage = C.dataUrlFromSvg(meta.svg);
     }
 
-    _showCursorFollower(clientX, clientY) {
+    _showCursorFollower(clientX, clientY, scale = 1) {
       const el = this._cursorFollower;
       if (!el) return;
       const hx = this._cursorFollowerHot.x;
       const hy = this._cursorFollowerHot.y;
+      const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
       el.style.transform = `translate(${Math.round(clientX - hx)}px, ${Math.round(
         clientY - hy
-      )}px)`;
+      )}px) scale(${s})`;
       el.classList.add("huabi-cursor-follower--visible");
     }
 
@@ -3115,7 +3268,18 @@
       this._cursorFollower?.classList.remove("huabi-cursor-follower--visible");
     }
 
-    _brushPointerMove(e) {
+    _resolveCursorFollowerScale(e) {
+      const tool = this.engine._activeTool();
+      if (S.isPenTool(tool) || S.isEraserTool(tool)) {
+        return 1;
+      }
+      if (this.settings?.pressureEnabled) {
+        return S.pressureScaleFactor(e, this.settings);
+      }
+      return 1;
+    }
+
+    _updateCursorFollowerFromEvent(e) {
       if (!this.active || !this.brushMode) return;
       if (this._textEditor || this.settingsPanel?.visible) return;
       if (this.root?.classList.contains("huabi-text-tool")) return;
@@ -3138,7 +3302,12 @@
         this._hideCursorFollower();
         return;
       }
-      this._showCursorFollower(e.clientX, e.clientY);
+      let scale = this._resolveCursorFollowerScale(e);
+      this._showCursorFollower(e.clientX, e.clientY, scale);
+    }
+
+    _brushPointerMove(e) {
+      this._updateCursorFollowerFromEvent(e);
     }
 
     toggleBrushMode() {
@@ -3543,6 +3712,7 @@
         this.root.classList.toggle("huabi-erasing", isEraser);
         this._updateCanvasCursors(toolId);
         this.engine.onPointerDown(e, toolId);
+        this._updateCursorFollowerFromEvent(e);
         const capEl = this.mainCanvas || wrap;
         if (capEl.setPointerCapture && e.pointerId !== undefined) {
           try {
@@ -3554,16 +3724,14 @@
         window.addEventListener("pointermove", move, true);
         window.addEventListener("pointerup", up, true);
         window.addEventListener("pointercancel", up, true);
-        window.addEventListener("mousemove", move, true);
-        window.addEventListener("mouseup", up, true);
         e.preventDefault();
         e.stopPropagation();
       };
 
       const move = (e) => {
         if (!this.engine.isDrawing) return;
-        this._brushPointerMove(e);
         this.engine.onPointerMove(e);
+        this._updateCursorFollowerFromEvent(e);
         e.preventDefault();
       };
 
@@ -3694,8 +3862,17 @@
             "pointerdown",
             (e) => {
               if (e.button !== 0) return;
+              if (e.target.closest(".huabi-tool-caret")) return;
               e.stopPropagation();
-              this.selectTool(btn.dataset.tool);
+              const toolId = btn.dataset.tool;
+              if (this.engine.tool === toolId) {
+                this._toggleToolPopover(
+                  toolId,
+                  btn.closest(".huabi-tool-wrap") || btn
+                );
+                return;
+              }
+              this.selectTool(toolId);
             },
             true
           );

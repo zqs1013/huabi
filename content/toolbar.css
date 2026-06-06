@@ -5,6 +5,8 @@
   --hb-hover: #f3f2f1;
   --hb-active: #deecf9;
   --hb-active-fg: #0078d4;
+  --hb-tip-bg: rgba(50, 49, 48, 0.94);
+  --hb-tip-fg: #fff;
 
   position: fixed;
   top: 16px;
@@ -25,6 +27,42 @@
   font-size: 12px;
   user-select: none;
   z-index: 2147483647;
+  overflow: visible;
+}
+
+/* 悬浮提示：功能名 + 快捷键 */
+#huabi-toolbar [data-tip]:not(.huabi-tool-caret) {
+  position: relative;
+}
+
+#huabi-toolbar [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--hb-tip-bg);
+  color: var(--hb-tip-fg);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+#huabi-toolbar [data-tip]:hover::after,
+#huabi-toolbar [data-tip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+#huabi-toolbar .huabi-tool-wrap {
+  overflow: visible;
 }
 
 #huabi-toolbar .huabi-drag-handle {
@@ -114,8 +152,8 @@
 
 #huabi-toolbar .huabi-color-btn {
   position: relative;
-  min-width: 34px;
-  padding: 2px 6px;
+  min-width: 32px;
+  padding: 0 6px;
   box-sizing: border-box;
 }
 
@@ -155,25 +193,32 @@
 }
 
 .huabi-tool-caret {
-  position: absolute;
+  position: absolute !important;
   right: 2px;
   bottom: 3px;
-  width: 0;
-  height: 0;
-  padding: 0;
+  display: block !important;
+  min-width: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
   margin: 0;
-  border: none;
-  border-left: 5px solid transparent;
-  border-bottom: 5px solid #a19f9d;
-  background: transparent;
+  border: none !important;
+  border-left: 5px solid transparent !important;
+  border-bottom: 5px solid #a19f9d !important;
+  border-radius: 0 !important;
+  background: transparent !important;
   cursor: pointer;
   z-index: 2;
   opacity: 0.85;
 }
 
+#huabi-toolbar .huabi-tool-caret:hover {
+  background: transparent !important;
+}
+
 .huabi-tool-caret:hover,
 .huabi-tool-caret.huabi-caret-open {
-  border-bottom-color: var(--hb-active-fg, #0078d4);
+  border-bottom-color: var(--hb-active-fg, #0078d4) !important;
   opacity: 1;
 }
 
@@ -182,7 +227,7 @@
   .huabi-tool-wrap
   .huabi-tool-btn.huabi-active-tool
   + .huabi-tool-caret {
-  border-bottom-color: var(--hb-active-fg, #0078d4);
+  border-bottom-color: var(--hb-active-fg, #0078d4) !important;
 }
 
 #huabi-tool-popover {
@@ -216,6 +261,12 @@
   font-size: 13px;
   font-weight: 600;
   line-height: 1.3;
+}
+
+.huabi-popover-title-note {
+  font-size: 10px;
+  font-weight: 400;
+  color: #605e5c;
 }
 
 .huabi-popover-hint {
@@ -341,9 +392,10 @@
 
 .huabi-popover-colors {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 4px 0 10px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 8px;
 }
 
 .huabi-popover-swatch-wrap {
@@ -359,6 +411,20 @@
   border: 1px solid #c8c6c4;
   border-radius: 6px;
   cursor: pointer;
+}
+
+.huabi-popover-swatch--active {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px #0078d4;
+}
+
+.huabi-popover-colors input[type="color"] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .huabi-popover-swatch-edit {

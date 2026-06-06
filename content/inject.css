@@ -89,7 +89,7 @@
   transform: translate(-9999px, -9999px);
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.05s ease;
+  transform-origin: 0 0;
 }
 
 #huabi-cursor-follower.huabi-cursor-follower--visible {

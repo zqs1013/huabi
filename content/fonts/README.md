@@ -26,7 +26,7 @@ npm run fonts:watch
 
 | 文件 | 作用 |
 |------|------|
-| `manifest.json` | 字体元数据 |
+| `fonts-manifest.json` | 字体元数据 |
 | `bundle-index.json` | 文件名索引 |
 | `../fonts.registry.generated.js` | 扩展启动时同步加载 |
 

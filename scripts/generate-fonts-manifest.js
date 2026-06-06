@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 
 const FONTS_DIR = path.join(__dirname, "..", "content", "fonts");
-const MANIFEST_FILE = path.join(FONTS_DIR, "manifest.json");
+const MANIFEST_FILE = path.join(FONTS_DIR, "fonts-manifest.json");
 const INDEX_FILE = path.join(FONTS_DIR, "bundle-index.json");
 const REGISTRY_JS = path.join(__dirname, "..", "content", "fonts.registry.generated.js");
 const EXT = new Set([".ttf", ".otf", ".woff", ".woff2"]);
@@ -73,7 +73,7 @@ function run() {
   const files = scanFonts();
   const manifest = buildManifest(files);
   writeOutputs(manifest);
-  console.log(`[fonts] ${manifest.length} 个字体 → manifest.json / bundle-index.json / fonts.registry.generated.js`);
+  console.log(`[fonts] ${manifest.length} 个字体 → fonts-manifest.json / bundle-index.json / fonts.registry.generated.js`);
   return manifest.length;
 }
 

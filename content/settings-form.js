@@ -33,19 +33,102 @@
     recordHint.hidden = true;
     container.appendChild(recordHint);
 
-    const toolsSec = el("section", "huabi-form-section");
-    toolsSec.appendChild(el("h3", "", "画笔颜色"));
-    const colorHint = el(
-      "p",
-      "huabi-form-hint",
-      "设置会自动保存到浏览器，换网页、重启后仍有效（需登录 Chrome 账号可同步到其他设备）。线宽、荧光笔透明度等请在工具栏各工具右下角 ▾ 中调整。"
+    const pressureSec = el("section", "huabi-form-section huabi-pressure-section");
+    const pressureHead = el("div", "huabi-settings-row-head");
+    pressureHead.appendChild(el("h3", "", "数位板压感"));
+    const pressurePopBtn = el("button", "huabi-settings-pop-trigger");
+    pressurePopBtn.type = "button";
+    pressurePopBtn.title = "压感设置";
+    pressurePopBtn.setAttribute("aria-label", "压感设置");
+    pressurePopBtn.setAttribute("aria-expanded", "false");
+    pressurePopBtn.textContent = "▾";
+    pressureHead.appendChild(pressurePopBtn);
+    pressureSec.appendChild(pressureHead);
+    pressureSec.appendChild(
+      el(
+        "p",
+        "huabi-form-hint huabi-form-hint--tight",
+        "默认开启：画笔、荧光笔、橡皮擦线宽随手写笔压力变化。画笔/荧光笔颜色与线宽请在工具栏对应工具 ▾ 中调整。"
+      )
     );
-    toolsSec.appendChild(colorHint);
 
-    S.COLOR_EDIT_TOOLS.forEach((toolId) => {
-      toolsSec.appendChild(buildColorBlock(toolId, state));
+    const pressurePop = el("div", "huabi-settings-popover");
+    pressurePop.hidden = true;
+
+    const pressureEnableLabel = el("label", "huabi-toolbar-visible-item");
+    const pressureEnableInp = document.createElement("input");
+    pressureEnableInp.type = "checkbox";
+    pressureEnableInp.checked = state.settings.pressureEnabled !== false;
+    pressureEnableInp.dataset.field = "pressure-enabled";
+    pressureEnableInp.addEventListener("change", scheduleAutoSave);
+    pressureEnableLabel.appendChild(pressureEnableInp);
+    pressureEnableLabel.appendChild(document.createTextNode("启用压感"));
+    pressurePop.appendChild(pressureEnableLabel);
+
+    const penOnlyLabel = el("label", "huabi-toolbar-visible-item");
+    const penOnlyInp = document.createElement("input");
+    penOnlyInp.type = "checkbox";
+    penOnlyInp.checked = state.settings.pressurePenOnly !== false;
+    penOnlyInp.dataset.field = "pressure-pen-only";
+    penOnlyInp.addEventListener("change", scheduleAutoSave);
+    penOnlyLabel.appendChild(penOnlyInp);
+    penOnlyLabel.appendChild(document.createTextNode("仅手写笔生效"));
+    pressurePop.appendChild(penOnlyLabel);
+
+    const minRatioInp = document.createElement("input");
+    minRatioInp.type = "number";
+    minRatioInp.min = "0.1";
+    minRatioInp.max = "2";
+    minRatioInp.step = "0.05";
+    minRatioInp.value = String(
+      state.settings.pressureMinRatio ?? S.DEFAULT_PRESSURE_MIN_RATIO
+    );
+    minRatioInp.dataset.field = "pressure-min-ratio";
+    minRatioInp.addEventListener("change", scheduleAutoSave);
+    pressurePop.appendChild(labelRow("最细倍数", minRatioInp));
+
+    const maxRatioInp = document.createElement("input");
+    maxRatioInp.type = "number";
+    maxRatioInp.min = "0.1";
+    maxRatioInp.max = "2";
+    maxRatioInp.step = "0.05";
+    maxRatioInp.value = String(
+      state.settings.pressureMaxRatio ?? S.DEFAULT_PRESSURE_MAX_RATIO
+    );
+    maxRatioInp.dataset.field = "pressure-max-ratio";
+    maxRatioInp.addEventListener("change", scheduleAutoSave);
+    pressurePop.appendChild(labelRow("最粗倍数", maxRatioInp));
+
+    pressurePop.appendChild(
+      el("p", "huabi-form-hint", "相对工具栏 ▾ 中的线宽，轻压为最细、重压为最粗（默认 0.35～1.0）。")
+    );
+    pressureSec.appendChild(pressurePop);
+    container.appendChild(pressureSec);
+
+    let pressurePopOpen = false;
+    const closePressurePop = () => {
+      pressurePopOpen = false;
+      pressurePop.hidden = true;
+      pressurePopBtn.classList.remove("huabi-settings-pop-open");
+      pressurePopBtn.setAttribute("aria-expanded", "false");
+    };
+    const togglePressurePop = () => {
+      pressurePopOpen = !pressurePopOpen;
+      pressurePop.hidden = !pressurePopOpen;
+      pressurePopBtn.classList.toggle("huabi-settings-pop-open", pressurePopOpen);
+      pressurePopBtn.setAttribute("aria-expanded", pressurePopOpen ? "true" : "false");
+    };
+    pressurePopBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePressurePop();
     });
-    container.appendChild(toolsSec);
+    pressurePop.addEventListener("click", (e) => e.stopPropagation());
+    const onDocClickClosePressure = (e) => {
+      if (!pressurePopOpen) return;
+      if (pressureSec.contains(e.target)) return;
+      closePressurePop();
+    };
+    document.addEventListener("click", onDocClickClosePressure, true);
 
     const textSec = el("section", "huabi-form-section");
     textSec.appendChild(el("h3", "", "文字工具"));
@@ -191,17 +274,31 @@
     scSec.appendChild(scTable);
     container.appendChild(scSec);
 
+    const version =
+      typeof chrome !== "undefined" && chrome.runtime?.getManifest
+        ? chrome.runtime.getManifest().version
+        : "";
+    const aboutSec = el("section", "huabi-form-section huabi-about-section");
+    aboutSec.appendChild(el("h3", "", "开发者介绍"));
+    const aboutInfo = el("div", "huabi-about-info");
+    aboutInfo.innerHTML = `
+      <p class="huabi-about-row"><span>开发者</span><span>邹庆松</span></p>
+      <p class="huabi-about-row"><span>电话</span><span>18603919370</span></p>
+      <p class="huabi-about-row"><span>版本</span><span>v${version || "—"}</span></p>`;
+    aboutSec.appendChild(aboutInfo);
+    container.appendChild(aboutSec);
+
     const actions = el("div", "huabi-form-actions");
     const btnSave = el("button", "huabi-btn primary", "立即保存");
     btnSave.type = "button";
     let autoSaveTimer = null;
+    const btnClose = el("button", "huabi-btn", "关闭");
+    btnClose.type = "button";
     const btnResetSc = el("button", "huabi-btn", "恢复默认快捷键");
     btnResetSc.type = "button";
-    const btnResetCol = el("button", "huabi-btn", "恢复默认颜色");
-    btnResetCol.type = "button";
     actions.appendChild(btnSave);
+    actions.appendChild(btnClose);
     actions.appendChild(btnResetSc);
-    actions.appendChild(btnResetCol);
     container.appendChild(actions);
 
     function renderShortcuts() {
@@ -231,37 +328,6 @@
         });
         scBody.appendChild(tr);
       });
-    }
-
-    function buildColorBlock(toolId, st) {
-      const block = el("div", "huabi-tool-block");
-      const profile = st.settings.toolProfiles[toolId] || {};
-      const saved = S.getSavedColors(profile, toolId);
-
-      block.innerHTML = `<h4>${S.COLOR_TOOL_LABELS[toolId] || toolId}</h4>`;
-
-      const colorsRow = el("div", "huabi-colors-row");
-      colorsRow.appendChild(document.createTextNode("保存色："));
-      saved.forEach((c, i) => {
-        const inp = document.createElement("input");
-        inp.type = "color";
-        inp.value = c;
-        inp.dataset.tool = toolId;
-        inp.dataset.slot = String(i);
-        inp.dataset.field = "saved-color";
-        inp.addEventListener("input", scheduleAutoSave);
-        colorsRow.appendChild(inp);
-      });
-      block.appendChild(colorsRow);
-
-      const customInp = document.createElement("input");
-      customInp.type = "color";
-      customInp.value = profile.color || saved[0];
-      customInp.dataset.tool = toolId;
-      customInp.dataset.field = "custom-color";
-      customInp.addEventListener("input", scheduleAutoSave);
-      block.appendChild(labelRow("当前颜色", customInp));
-      return block;
     }
 
     function labelRow(label, input) {
@@ -294,23 +360,15 @@
     }
 
     function collect() {
-      container.querySelectorAll('[data-field="saved-color"]').forEach((inp) => {
-        const tid = inp.dataset.tool;
-        const slot = Number(inp.dataset.slot);
-        if (!state.settings.toolProfiles[tid]) state.settings.toolProfiles[tid] = {};
-        if (!state.settings.toolProfiles[tid].savedColors) {
-          state.settings.toolProfiles[tid].savedColors = S.getSavedColors(
-            state.settings.toolProfiles[tid],
-            tid
-          );
-        }
-        state.settings.toolProfiles[tid].savedColors[slot] = inp.value;
-      });
-      container.querySelectorAll('[data-field="custom-color"]').forEach((inp) => {
-        const tid = inp.dataset.tool;
-        if (!state.settings.toolProfiles[tid]) state.settings.toolProfiles[tid] = {};
-        state.settings.toolProfiles[tid].color = inp.value;
-      });
+      const pe = container.querySelector('[data-field="pressure-enabled"]');
+      if (pe) state.settings.pressureEnabled = pe.checked;
+      const ppo = container.querySelector('[data-field="pressure-pen-only"]');
+      if (ppo) state.settings.pressurePenOnly = ppo.checked;
+      const pmin = container.querySelector('[data-field="pressure-min-ratio"]');
+      if (pmin) state.settings.pressureMinRatio = Number(pmin.value);
+      const pmax = container.querySelector('[data-field="pressure-max-ratio"]');
+      if (pmax) state.settings.pressureMaxRatio = Number(pmax.value);
+      Object.assign(state.settings, S.normalizePressureSettings(state.settings));
       return state.settings;
     }
 
@@ -352,32 +410,25 @@
 
     btnSave.addEventListener("click", () => {
       clearTimeout(autoSaveTimer);
-      persistSettings().catch(() => {
-        status.textContent = "保存失败，请重试";
-        status.classList.add("error");
-        status.hidden = false;
-      });
+      persistSettings()
+        .then(() => {
+          if (options.onClose) options.onClose({ skipFlush: true });
+        })
+        .catch(() => {
+          status.textContent = "保存失败，请重试";
+          status.classList.add("error");
+          status.hidden = false;
+        });
+    });
+
+    btnClose.addEventListener("click", () => {
+      if (options.onClose) options.onClose();
     });
 
     btnResetSc.addEventListener("click", () => {
       state.settings.shortcuts = { ...S.DEFAULT_SHORTCUTS };
       renderShortcuts();
       status.textContent = "已恢复默认快捷键（需点保存）";
-      status.classList.remove("error");
-      status.hidden = false;
-    });
-
-    btnResetCol.addEventListener("click", () => {
-      const defs = S.getDefaultSettings().toolProfiles;
-      S.COLOR_EDIT_TOOLS.forEach((id) => {
-        state.settings.toolProfiles[id] = {
-          ...state.settings.toolProfiles[id],
-          ...defs[id],
-          savedColors: [...defs[id].savedColors],
-        };
-      });
-      mount(container, { ...options, settings: state.settings });
-      status.textContent = "已恢复默认颜色（需点保存）";
       status.classList.remove("error");
       status.hidden = false;
     });
@@ -393,6 +444,7 @@
       destroy() {
         clearTimeout(autoSaveTimer);
         document.removeEventListener("keydown", onKeyRecord, true);
+        document.removeEventListener("click", onDocClickClosePressure, true);
       },
       refresh(newSettings) {
         state.settings = newSettings;

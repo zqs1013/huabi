@@ -2,7 +2,8 @@
 
 在任意网页上叠加透明画布，支持画笔、荧光笔、直线、矩形、表格、坐标系、文字等标注工具。
 
-详细说明见 [docs/用户指南.md](docs/用户指南.md)。
+- 用户文档：[docs/用户指南.md](docs/用户指南.md)
+- **AI / 开发者索引**：[INDEX.md](INDEX.md)（项目架构、模块职责、修改约定）
 
 ## 安装（开发者）
 
@@ -14,7 +15,7 @@
 
 | 命令 | 说明 |
 |------|------|
-| `npm run fonts` | 扫描字体目录，更新 `manifest.json` / `fonts.registry.generated.js` |
+| `npm run fonts` | 扫描字体目录，更新 `fonts-manifest.json` / `fonts.registry.generated.js` |
 | `npm run fonts:watch` | 监听字体目录自动更新索引 |
 | `npm run icons` | 从 SVG 生成扩展图标 PNG |
 | `npm run icons:toolbar` | 从 `content/iconfont` 生成工具栏内联图标 JS |
